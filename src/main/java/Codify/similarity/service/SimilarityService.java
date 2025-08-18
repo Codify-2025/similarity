@@ -1,6 +1,12 @@
 package Codify.similarity.service;
 
 import Codify.similarity.domain.Result;
+import Codify.similarity.exception.ErrorCode;
+import Codify.similarity.exception.baseException.BaseException;
+import Codify.similarity.exception.submissionexception.SameStudentComparisonException;
+import Codify.similarity.exception.submissionexception.SameSubmissionComparisonException;
+import Codify.similarity.exception.submissionexception.StudentSubmissionMismatchException;
+import Codify.similarity.exception.submissionexception.SubmissionNotFoundException;
 import Codify.similarity.model.TreeNode;
 import Codify.similarity.core.ASTVectorizer;
 import Codify.similarity.core.CosineSimilarity;
@@ -9,6 +15,8 @@ import Codify.similarity.model.TreeNodeBuilder;
 import Codify.similarity.mongo.ResultDocRepository;
 import Codify.similarity.repository.ResultRepository;
 import Codify.similarity.service.dto.AnalysisResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,27 +29,50 @@ public class SimilarityService {
 
     private final ResultDocRepository resultDocRepository; // Mongo
     private final ResultRepository resultRepository; // JPA
-    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     private static final double COSINE_THRESHOLD = 0.6;
 
     @Transactional
-    public AnalysisResult analyzeAndSaveByStudent(Long fromStudentId, Long toStudentId) {
+    public AnalysisResult analyzeAndSave(
+            Long fromStudentId, Long fromSubmissionId, Long toStudentId, Long toSubmissionId
+    ) {
         try {
-            var fromSubmissionOpt = resultDocRepository.findTopByStudentIdOrderBySubmissionIdDesc(fromStudentId);
-            var toSubmissionOpt = resultDocRepository.findTopByStudentIdOrderBySubmissionIdDesc(toStudentId);
+            // 1. 동일한 제출물 감지
+            if (fromSubmissionId == null || toSubmissionId == null
+                    || fromStudentId == null || toStudentId == null) {
+                throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
+            }
+            if (fromSubmissionId.equals(toSubmissionId)) {
+                throw new SameSubmissionComparisonException();
+            }
+            if (fromStudentId.equals(toStudentId)) {
+                throw new SameStudentComparisonException();
+            }
 
-            if (fromSubmissionOpt.isEmpty() || toSubmissionOpt.isEmpty()) {
-                // 아직 준비되지 않음
+            // 2. exception: submissionId 존재 여부 감지
+            var fromSubmissionDoc = resultDocRepository.findBySubmissionId(fromSubmissionId)
+                    .orElseThrow(SubmissionNotFoundException::new);
+            var toSubmissionDoc = resultDocRepository.findBySubmissionId(toSubmissionId)
+                    .orElseThrow(SubmissionNotFoundException::new);
+
+            // 3. 제출물-학번 매칭 감지
+            if (!fromStudentId.equals(fromSubmissionDoc.getStudentId())
+                    || !toStudentId.equals(toSubmissionDoc.getStudentId())) {
+                throw new StudentSubmissionMismatchException();
+            }
+
+            // AST 비어 있는 경우 -> READY 반환
+            if (fromSubmissionDoc.getAst() == null || toSubmissionDoc.getAst() == null) {
                 return new AnalysisResult(AnalysisResult.Status.READY, null, null, null);
             }
 
-            var json1 = toJsonNode(fromSubmissionOpt.get().getAst());
-            var json2 = toJsonNode(toSubmissionOpt.get().getAst());
+            JsonNode json1 = toJsonNode(fromSubmissionDoc.getAst());
+            JsonNode json2 = toJsonNode(toSubmissionDoc.getAst());
 
             // 1차 필터링: 타입 벡터 + 코사인
-            var vec1 = ASTVectorizer.buildTypeVector(json1);
-            var vec2 = ASTVectorizer.buildTypeVector(json2);
+            Map<String, Integer> vec1 = ASTVectorizer.buildTypeVector(json1);
+            Map<String, Integer> vec2 = ASTVectorizer.buildTypeVector(json2);
             double cosine = CosineSimilarity.calculate(vec1, vec2);
 
             Integer ted = null;
@@ -56,14 +87,11 @@ public class SimilarityService {
                 normalized = 1.0 - ((double) ted / maxSize);
             }
 
-            Long fromSubmissionId = fromSubmissionOpt.get().getSubmissionId(); // MongoDB에 저장된 과제 제출 ID (첫 번째 학생)
-            Long submissionIdForResult = fromSubmissionId; // 첫 번째 학생의 과제 제출 Id를 Result(MySQL) 테이블의 과제 제출 Id로 저장
-
             // Result 저장 — accumulateResult = normalized
             Result result = new Result();
             result.setSubmissionFromId(fromStudentId); // 첫 번째 학생의 학번
             result.setSubmissionToId(toStudentId); // 두 번째 학생의 학번
-            result.setSubmissionId(submissionIdForResult);
+            result.setSubmissionId(fromSubmissionId);
             if (normalized != null) {
                 result.setAccumulateResult(normalized);
             } else {
@@ -73,12 +101,16 @@ public class SimilarityService {
             resultRepository.save(result);
 
             return new AnalysisResult(AnalysisResult.Status.DONE, cosine, ted, normalized);
+        } catch (BaseException be) {
+            // 비즈니스 예외는 컨트롤러에서 200
+            throw be;
         } catch (Exception e) {
-            return new AnalysisResult(AnalysisResult.Status.ERROR, null, null, null);
+            // 알 수 없는 예외는 내부 서버 에러
+            throw new BaseException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
 
-    private com.fasterxml.jackson.databind.JsonNode toJsonNode(Object ast) {
+    private JsonNode toJsonNode(Object ast) {
         if (ast instanceof Map || ast instanceof java.util.List) {
             return objectMapper.valueToTree(ast);
         }
@@ -99,53 +131,4 @@ public class SimilarityService {
         }
         return count;
     }
-
-    /*public Result analyzeAndSave(JsonNode json1, JsonNode json2, Long fromId, Long toId) throws Exception {
-        //JsonNode ast1 = objectMapper.readTree(json1);
-        //JsonNode ast2 = objectMapper.readTree(json2);
-
-        // 1차 필터링: 타입 벡터 + 코사인 유사도
-        var vec1 = ASTVectorizer.buildTypeVector(json1);
-        var vec2 = ASTVectorizer.buildTypeVector(json2);
-
-        double cosine = CosineSimilarity.calculate(vec1, vec2);
-
-        Integer ted = null;
-        Double normalized = null;
-
-        // 임계치 이상인 경우 2차 분석
-        if (cosine >= 0.6) {
-            TreeNode tree1 = TreeNodeBuilder.fromJson(json1);
-            TreeNode tree2 = TreeNodeBuilder.fromJson(json2);
-            ted = TreeEditDistance.compute(tree1, tree2);
-            int maxSize = Math.max(countNodes(tree1), countNodes(tree2));
-            normalized = 1.0 - ((double) ted / maxSize);
-        }
-
-        // 4) 결과 저장 — 네이티브 INSERT
-        jdbc.update("""
-            INSERT INTO Result (submissionId, submission_from_id, submission_to_id, accumulateResult)
-             VALUES (?, ?, ?, ?)
-        """, ps -> {
-            ps.setLong(1, submissionId);     // BIGINT
-            ps.setLong(2, fromId);           // BIGINT
-            ps.setBytes(3, uuidToBytes(toId)); // BINARY(16) 변환
-            ps.setDouble(4, cosine);         // FLOAT
-        });
-
-        Result result = new Result();
-        result.setSubmissionFromId(fromId);
-        result.setSubmissionToId(toId);
-        result.setAccumulateResult(cosine);
-        return result;
-    }
-
-    private int countNodes(TreeNode node) {
-        if (node == null) return 0;
-        int count = 1;
-        for (TreeNode child: node.children) {
-            count += countNodes(child);
-        }
-        return count;
-    }*/
 }
