@@ -10,6 +10,10 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
 
+  data:
+    mongodb:
+      uri: mongodb+srv://${MONGO_USERNAME}:${MONGO_PASSWORD}@codify.mongocluster.cosmos.azure.com/codify?tls=true&authSource=admin&authMechanism=SCRAM-SHA-256&retrywrites=false&maxIdleTimeMS=120000
+
   jpa:
     database: mysql
     database-platform: org.hibernate.dialect.MySQL8Dialect
