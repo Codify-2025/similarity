@@ -1,19 +1,26 @@
 package Codify.similarity.service;
 
 import Codify.similarity.domain.Result;
+import Codify.similarity.exception.ErrorCode;
+import Codify.similarity.exception.baseException.BaseException;
+import Codify.similarity.exception.submissionexception.StudentSubmissionMismatchException;
+import Codify.similarity.exception.submissionexception.SubmissionNotFoundException;
 import Codify.similarity.model.TreeNode;
 import Codify.similarity.core.ASTVectorizer;
 import Codify.similarity.core.CosineSimilarity;
 import Codify.similarity.core.TreeEditDistance;
 import Codify.similarity.model.TreeNodeBuilder;
+import Codify.similarity.mongo.ResultDoc;
 import Codify.similarity.mongo.ResultDocRepository;
 import Codify.similarity.repository.ResultRepository;
-import Codify.similarity.service.dto.AnalysisResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -21,64 +28,64 @@ public class SimilarityService {
 
     private final ResultDocRepository resultDocRepository; // Mongo
     private final ResultRepository resultRepository; // JPA
-    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     private static final double COSINE_THRESHOLD = 0.6;
 
     @Transactional
-    public AnalysisResult analyzeAndSaveByStudent(Long fromStudentId, Long toStudentId) {
-        try {
-            var fromSubmissionOpt = resultDocRepository.findTopByStudentIdOrderBySubmissionIdDesc(fromStudentId);
-            var toSubmissionOpt = resultDocRepository.findTopByStudentIdOrderBySubmissionIdDesc(toStudentId);
+    public void analyzeAndSave(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
+        if (assignmentId == null || fromStudentId == null || fromSubmissionId == null) {
+            throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
+        }
 
-            if (fromSubmissionOpt.isEmpty() || toSubmissionOpt.isEmpty()) {
-                // 아직 준비되지 않음
-                return new AnalysisResult(AnalysisResult.Status.READY, null, null, null);
-            }
+        // 1. 동일한 제출물 감지
+        var fromSubmissionDoc = resultDocRepository.findBySubmissionId(fromSubmissionId)
+                .orElseThrow(SubmissionNotFoundException::new);
+        if (!Objects.equals(fromSubmissionDoc.getStudentId(), fromStudentId)) {
+            throw new StudentSubmissionMismatchException(); // 학번 != 제출물
+        }
+        if (!Objects.equals(fromSubmissionDoc.getAssignmentId(), assignmentId)){
+            throw new BaseException(ErrorCode.INVALID_INPUT_VALUE); // 과제 불일치
+        }
 
-            var json1 = toJsonNode(fromSubmissionOpt.get().getAst());
-            var json2 = toJsonNode(toSubmissionOpt.get().getAst());
+        // 2. 같은 과제 & submissionId > Y
+        var candidatesSubmission = resultDocRepository
+                .findAllByAssignmentIdAndSubmissionIdGreaterThanOrderBySubmissionIdAsc(
+                        assignmentId, fromSubmissionId
+                );
 
-            // 1차 필터링: 타입 벡터 + 코사인
-            var vec1 = ASTVectorizer.buildTypeVector(json1);
-            var vec2 = ASTVectorizer.buildTypeVector(json2);
-            double cosine = CosineSimilarity.calculate(vec1, vec2);
+        JsonNode fromJson = toJsonNode(fromSubmissionDoc.getAst());
+        var fromVec = ASTVectorizer.buildTypeVector(fromJson);
+        TreeNode fromTree = null;
 
-            Integer ted = null;
+        // for 루프
+        for(ResultDoc candidates : candidatesSubmission) {
+            if (candidates.getAst() == null) continue;
+            JsonNode candidatesJson = toJsonNode(candidates.getAst());
+            double cosine = CosineSimilarity.calculate(fromVec, ASTVectorizer.buildTypeVector(candidatesJson));
+
             Double normalized = null;
-
-            // 2차 분석: 임계치 이상일 때 TED
             if (cosine >= COSINE_THRESHOLD) {
-                TreeNode tree1 = TreeNodeBuilder.fromJson(json1);
-                TreeNode tree2 = TreeNodeBuilder.fromJson(json2);
-                ted = TreeEditDistance.compute(tree1, tree2);
-                int maxSize = Math.max(countNodes(tree1), countNodes(tree2));
+                if (fromTree == null) fromTree = TreeNodeBuilder.fromJson(fromJson);
+                TreeNode candidatesTree = TreeNodeBuilder.fromJson(candidatesJson);
+                int ted = TreeEditDistance.compute(fromTree, candidatesTree);
+                int maxSize = Math.max(countNodes(fromTree), countNodes(candidatesTree));
                 normalized = 1.0 - ((double) ted / maxSize);
             }
 
-            Long fromSubmissionId = fromSubmissionOpt.get().getSubmissionId(); // MongoDB에 저장된 과제 제출 ID (첫 번째 학생)
-            Long submissionIdForResult = fromSubmissionId; // 첫 번째 학생의 과제 제출 Id를 Result(MySQL) 테이블의 과제 제출 Id로 저장
-
             // Result 저장 — accumulateResult = normalized
             Result result = new Result();
-            result.setSubmissionFromId(fromStudentId); // 첫 번째 학생의 학번
-            result.setSubmissionToId(toStudentId); // 두 번째 학생의 학번
-            result.setSubmissionId(submissionIdForResult);
-            if (normalized != null) {
-                result.setAccumulateResult(normalized);
-            } else {
-                // 1차 필터링에서 유사도 수치가 낮게 나온 경우
-                result.setAccumulateResult(0.0); // 0.0으로 넣을지 다른 수치 넣을지 고민 중
-            }
-            resultRepository.save(result);
+            result.setStudentFromId(fromStudentId.longValue());
+            result.setSubmissionFromId(fromSubmissionId.longValue());
+            result.setStudentToId(candidates.getStudentId().longValue());
+            result.setSubmissionToId(candidates.getSubmissionId().longValue());
+            result.setAccumulateResult(normalized != null ? normalized : 0.0);
 
-            return new AnalysisResult(AnalysisResult.Status.DONE, cosine, ted, normalized);
-        } catch (Exception e) {
-            return new AnalysisResult(AnalysisResult.Status.ERROR, null, null, null);
+            resultRepository.save(result);
         }
     }
 
-    private com.fasterxml.jackson.databind.JsonNode toJsonNode(Object ast) {
+    private JsonNode toJsonNode(Object ast) {
         if (ast instanceof Map || ast instanceof java.util.List) {
             return objectMapper.valueToTree(ast);
         }
@@ -99,53 +106,4 @@ public class SimilarityService {
         }
         return count;
     }
-
-    /*public Result analyzeAndSave(JsonNode json1, JsonNode json2, Long fromId, Long toId) throws Exception {
-        //JsonNode ast1 = objectMapper.readTree(json1);
-        //JsonNode ast2 = objectMapper.readTree(json2);
-
-        // 1차 필터링: 타입 벡터 + 코사인 유사도
-        var vec1 = ASTVectorizer.buildTypeVector(json1);
-        var vec2 = ASTVectorizer.buildTypeVector(json2);
-
-        double cosine = CosineSimilarity.calculate(vec1, vec2);
-
-        Integer ted = null;
-        Double normalized = null;
-
-        // 임계치 이상인 경우 2차 분석
-        if (cosine >= 0.6) {
-            TreeNode tree1 = TreeNodeBuilder.fromJson(json1);
-            TreeNode tree2 = TreeNodeBuilder.fromJson(json2);
-            ted = TreeEditDistance.compute(tree1, tree2);
-            int maxSize = Math.max(countNodes(tree1), countNodes(tree2));
-            normalized = 1.0 - ((double) ted / maxSize);
-        }
-
-        // 4) 결과 저장 — 네이티브 INSERT
-        jdbc.update("""
-            INSERT INTO Result (submissionId, submission_from_id, submission_to_id, accumulateResult)
-             VALUES (?, ?, ?, ?)
-        """, ps -> {
-            ps.setLong(1, submissionId);     // BIGINT
-            ps.setLong(2, fromId);           // BIGINT
-            ps.setBytes(3, uuidToBytes(toId)); // BINARY(16) 변환
-            ps.setDouble(4, cosine);         // FLOAT
-        });
-
-        Result result = new Result();
-        result.setSubmissionFromId(fromId);
-        result.setSubmissionToId(toId);
-        result.setAccumulateResult(cosine);
-        return result;
-    }
-
-    private int countNodes(TreeNode node) {
-        if (node == null) return 0;
-        int count = 1;
-        for (TreeNode child: node.children) {
-            count += countNodes(child);
-        }
-        return count;
-    }*/
 }

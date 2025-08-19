@@ -1,5 +1,7 @@
 package Codify.similarity.web.controller;
 
+import Codify.similarity.exception.ErrorCode;
+import Codify.similarity.exception.baseException.BaseException;
 import Codify.similarity.service.dto.AnalysisResult;
 import Codify.similarity.service.SimilarityService;
 import lombok.RequiredArgsConstructor;
@@ -17,48 +19,45 @@ public class SimilarityController {
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> run(
-            @RequestParam Long fromStudentId,
-            @RequestParam Long toStudentId
+            @RequestParam Integer assignmentId,
+            @RequestParam Integer studentId,
+            @RequestParam Integer submissionId
     ) {
-        AnalysisResult ar = similarityService.analyzeAndSaveByStudent(fromStudentId, toStudentId);
-
-        String status = switch (ar.getStatus()) {
-            case READY -> "READY";
-            case DONE -> "DONE";
-            case ERROR -> "ERROR";
-        };
-
-        // 요구 포맷: 항상 200, message.status만 다르게
-        return ResponseEntity.ok(
-                Map.of(
-                        "status", 200,
-                        "success", true,
-                        "message", Map.of("status", status)
-                )
-        );
+        try {
+            similarityService.analyzeAndSave(assignmentId, studentId, submissionId);
+            return ResponseEntity.ok(
+                    Map.of(
+                            "status", 200,
+                            "success", true,
+                            "message", Map.of("status", "DONE")
+                    )
+            );
+        } catch (BaseException be) {
+            var ec = be.getErrorCode();
+            return ResponseEntity.ok(
+                    Map.of(
+                            "status", 200,
+                            "success", true,
+                            "message", Map.of(
+                                    "status", "ERROR",
+                                    "code", ec.getCode(),
+                                    "message", ec.getMessage()
+                            )
+                    )
+            );
+        } catch (Exception e) {
+            var ec = ErrorCode.INTERNAL_SERVER_ERROR;
+            return ResponseEntity.ok(
+                    Map.of(
+                            "status", 200,
+                            "success", true,
+                            "message", Map.of(
+                                    "status", "ERROR",
+                                    "code", ec.getCode(),
+                                    "message", ec.getMessage()
+                            )
+                    )
+            );
+        }
     }
-
-    /*@PostMapping
-    public ResponseEntity<SimilarityResponseDto> calculate(
-            @RequestParam Long fromId,
-            @RequestParam Long toId,
-            @Valid @RequestBody CompareRequest request
-    ) throws Exception {
-
-        // JSON(AST) + submissionId로 분석 및 저장
-        Result result = similarityService.analyzeAndSave(
-                request.getJson1(), request.getJson2(), fromId, toId
-        );
-
-         double cosine = result.getAccumulateResult();
-         return ResponseEntity.ok(new SimilarityResponseDto(cosine, null, null));
-    }
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    public static class CompareRequest {
-        private JsonNode json1;
-        private JsonNode json2;
-    }*/
 }
