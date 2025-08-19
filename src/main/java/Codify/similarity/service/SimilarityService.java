@@ -3,8 +3,6 @@ package Codify.similarity.service;
 import Codify.similarity.domain.Result;
 import Codify.similarity.exception.ErrorCode;
 import Codify.similarity.exception.baseException.BaseException;
-import Codify.similarity.exception.submissionexception.SameStudentComparisonException;
-import Codify.similarity.exception.submissionexception.SameSubmissionComparisonException;
 import Codify.similarity.exception.submissionexception.StudentSubmissionMismatchException;
 import Codify.similarity.exception.submissionexception.SubmissionNotFoundException;
 import Codify.similarity.model.TreeNode;
@@ -12,9 +10,9 @@ import Codify.similarity.core.ASTVectorizer;
 import Codify.similarity.core.CosineSimilarity;
 import Codify.similarity.core.TreeEditDistance;
 import Codify.similarity.model.TreeNodeBuilder;
+import Codify.similarity.mongo.ResultDoc;
 import Codify.similarity.mongo.ResultDocRepository;
 import Codify.similarity.repository.ResultRepository;
-import Codify.similarity.service.dto.AnalysisResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -34,79 +33,55 @@ public class SimilarityService {
     private static final double COSINE_THRESHOLD = 0.6;
 
     @Transactional
-    public AnalysisResult analyzeAndSave(
-            Long fromStudentId, Long fromSubmissionId, Long toStudentId, Long toSubmissionId
-    ) {
-        try {
-            // 1. 동일한 제출물 감지
-            if (fromSubmissionId == null || toSubmissionId == null
-                    || fromStudentId == null || toStudentId == null) {
-                throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
-            }
-            if (fromSubmissionId.equals(toSubmissionId)) {
-                throw new SameSubmissionComparisonException();
-            }
-            if (fromStudentId.equals(toStudentId)) {
-                throw new SameStudentComparisonException();
-            }
+    public void analyzeAndSave(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
+        if (assignmentId == null || fromStudentId == null || fromSubmissionId == null) {
+            throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
+        }
 
-            // 2. exception: submissionId 존재 여부 감지
-            var fromSubmissionDoc = resultDocRepository.findBySubmissionId(fromSubmissionId)
-                    .orElseThrow(SubmissionNotFoundException::new);
-            var toSubmissionDoc = resultDocRepository.findBySubmissionId(toSubmissionId)
-                    .orElseThrow(SubmissionNotFoundException::new);
+        // 1. 동일한 제출물 감지
+        var fromSubmissionDoc = resultDocRepository.findBySubmissionId(fromSubmissionId)
+                .orElseThrow(SubmissionNotFoundException::new);
+        if (!Objects.equals(fromSubmissionDoc.getStudentId(), fromStudentId)) {
+            throw new StudentSubmissionMismatchException(); // 학번 != 제출물
+        }
+        if (!Objects.equals(fromSubmissionDoc.getAssignmentId(), assignmentId)){
+            throw new BaseException(ErrorCode.INVALID_INPUT_VALUE); // 과제 불일치
+        }
 
-            // 3. 제출물-학번 매칭 감지
-            if (!fromStudentId.equals(fromSubmissionDoc.getStudentId())
-                    || !toStudentId.equals(toSubmissionDoc.getStudentId())) {
-                throw new StudentSubmissionMismatchException();
-            }
+        // 2. 같은 과제 & submissionId > Y
+        var candidatesSubmission = resultDocRepository
+                .findAllByAssignmentIdAndSubmissionIdGreaterThanOrderBySubmissionIdAsc(
+                        assignmentId, fromSubmissionId
+                );
 
-            // AST 비어 있는 경우 -> READY 반환
-            if (fromSubmissionDoc.getAst() == null || toSubmissionDoc.getAst() == null) {
-                return new AnalysisResult(AnalysisResult.Status.READY, null, null, null);
-            }
+        JsonNode fromJson = toJsonNode(fromSubmissionDoc.getAst());
+        var fromVec = ASTVectorizer.buildTypeVector(fromJson);
+        TreeNode fromTree = null;
 
-            JsonNode json1 = toJsonNode(fromSubmissionDoc.getAst());
-            JsonNode json2 = toJsonNode(toSubmissionDoc.getAst());
+        // for 루프
+        for(ResultDoc candidates : candidatesSubmission) {
+            if (candidates.getAst() == null) continue;
+            JsonNode candidatesJson = toJsonNode(candidates.getAst());
+            double cosine = CosineSimilarity.calculate(fromVec, ASTVectorizer.buildTypeVector(candidatesJson));
 
-            // 1차 필터링: 타입 벡터 + 코사인
-            Map<String, Integer> vec1 = ASTVectorizer.buildTypeVector(json1);
-            Map<String, Integer> vec2 = ASTVectorizer.buildTypeVector(json2);
-            double cosine = CosineSimilarity.calculate(vec1, vec2);
-
-            Integer ted = null;
             Double normalized = null;
-
-            // 2차 분석: 임계치 이상일 때 TED
             if (cosine >= COSINE_THRESHOLD) {
-                TreeNode tree1 = TreeNodeBuilder.fromJson(json1);
-                TreeNode tree2 = TreeNodeBuilder.fromJson(json2);
-                ted = TreeEditDistance.compute(tree1, tree2);
-                int maxSize = Math.max(countNodes(tree1), countNodes(tree2));
+                if (fromTree == null) fromTree = TreeNodeBuilder.fromJson(fromJson);
+                TreeNode candidatesTree = TreeNodeBuilder.fromJson(candidatesJson);
+                int ted = TreeEditDistance.compute(fromTree, candidatesTree);
+                int maxSize = Math.max(countNodes(fromTree), countNodes(candidatesTree));
                 normalized = 1.0 - ((double) ted / maxSize);
             }
 
             // Result 저장 — accumulateResult = normalized
             Result result = new Result();
-            result.setSubmissionFromId(fromStudentId); // 첫 번째 학생의 학번
-            result.setSubmissionToId(toStudentId); // 두 번째 학생의 학번
-            result.setSubmissionId(fromSubmissionId);
-            if (normalized != null) {
-                result.setAccumulateResult(normalized);
-            } else {
-                // 1차 필터링에서 유사도 수치가 낮게 나온 경우
-                result.setAccumulateResult(0.0); // 0.0으로 넣을지 다른 수치 넣을지 고민 중
-            }
-            resultRepository.save(result);
+            result.setStudentFromId(fromStudentId.longValue());
+            result.setSubmissionFromId(fromSubmissionId.longValue());
+            result.setStudentToId(candidates.getStudentId().longValue());
+            result.setSubmissionToId(candidates.getSubmissionId().longValue());
+            result.setAccumulateResult(normalized != null ? normalized : 0.0);
 
-            return new AnalysisResult(AnalysisResult.Status.DONE, cosine, ted, normalized);
-        } catch (BaseException be) {
-            // 비즈니스 예외는 컨트롤러에서 200
-            throw be;
-        } catch (Exception e) {
-            // 알 수 없는 예외는 내부 서버 에러
-            throw new BaseException(ErrorCode.INTERNAL_SERVER_ERROR);
+            resultRepository.save(result);
         }
     }
 

@@ -20,8 +20,11 @@ public class Result {
     @Column(name = "submission_to_id")
     private Long submissionToId;
 
-    @Column(name = "submissionId")
-    private Long submissionId;
+    @Column(name = "student_from_id")
+    private Long studentFromId;
+
+    @Column(name = "student_to_id")
+    private Long studentToId;
 
     @Column(name = "accumulateResult")
     private double accumulateResult;

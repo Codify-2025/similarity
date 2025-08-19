@@ -19,53 +19,42 @@ public class SimilarityController {
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> run(
-            @RequestParam Long fromStudentId,
-            @RequestParam Long fromSubmissionId,
-            @RequestParam Long toStudentId,
-            @RequestParam Long toSubmissionId
+            @RequestParam Integer assignmentId,
+            @RequestParam Integer studentId,
+            @RequestParam Integer submissionId
     ) {
-        try{
-            AnalysisResult analysisResult = similarityService.analyzeAndSave(
-                    fromStudentId, fromSubmissionId, toStudentId, toSubmissionId
-            );
-
-            String status = switch (analysisResult.getStatus()) {
-                case READY -> "READY";
-                case DONE -> "DONE";
-                case ERROR -> "ERROR";
-            };
-
-            // 항상 200, message.status만 다르게
+        try {
+            similarityService.analyzeAndSave(assignmentId, studentId, submissionId);
             return ResponseEntity.ok(
                     Map.of(
                             "status", 200,
                             "success", true,
-                            "message", Map.of("status", status)
+                            "message", Map.of("status", "DONE")
                     )
             );
-        } catch (BaseException baseException) {
-            var errorCode = baseException.getErrorCode();
+        } catch (BaseException be) {
+            var ec = be.getErrorCode();
             return ResponseEntity.ok(
                     Map.of(
                             "status", 200,
                             "success", true,
                             "message", Map.of(
                                     "status", "ERROR",
-                                    "code", errorCode.getCode(),
-                                    "message", errorCode.getMessage()
-                                    )
+                                    "code", ec.getCode(),
+                                    "message", ec.getMessage()
+                            )
                     )
             );
         } catch (Exception e) {
-            ErrorCode errorCode = ErrorCode.INTERNAL_SERVER_ERROR;
+            var ec = ErrorCode.INTERNAL_SERVER_ERROR;
             return ResponseEntity.ok(
                     Map.of(
                             "status", 200,
                             "success", true,
                             "message", Map.of(
                                     "status", "ERROR",
-                                    "code", errorCode.getCode(),
-                                    "message", errorCode.getMessage()
+                                    "code", ec.getCode(),
+                                    "message", ec.getMessage()
                             )
                     )
             );
