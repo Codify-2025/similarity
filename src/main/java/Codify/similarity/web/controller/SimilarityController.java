@@ -1,8 +1,5 @@
 package Codify.similarity.web.controller;
 
-import Codify.similarity.exception.ErrorCode;
-import Codify.similarity.exception.baseException.BaseException;
-import Codify.similarity.service.dto.AnalysisResult;
 import Codify.similarity.service.SimilarityService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -12,7 +9,7 @@ import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/similarity")
+@RequestMapping("/api/similarity/assignments/{assignmentId}/submissions/{submissionId}")
 public class SimilarityController {
 
     private final SimilarityService similarityService;
@@ -23,41 +20,23 @@ public class SimilarityController {
             @RequestParam Integer studentId,
             @RequestParam Integer submissionId
     ) {
-        try {
-            similarityService.analyzeAndSave(assignmentId, studentId, submissionId);
-            return ResponseEntity.ok(
-                    Map.of(
-                            "status", 200,
-                            "success", true,
-                            "message", Map.of("status", "DONE")
-                    )
-            );
-        } catch (BaseException be) {
-            var ec = be.getErrorCode();
-            return ResponseEntity.ok(
-                    Map.of(
-                            "status", 200,
-                            "success", true,
-                            "message", Map.of(
-                                    "status", "ERROR",
-                                    "code", ec.getCode(),
-                                    "message", ec.getMessage()
-                            )
-                    )
-            );
-        } catch (Exception e) {
-            var ec = ErrorCode.INTERNAL_SERVER_ERROR;
-            return ResponseEntity.ok(
-                    Map.of(
-                            "status", 200,
-                            "success", true,
-                            "message", Map.of(
-                                    "status", "ERROR",
-                                    "code", ec.getCode(),
-                                    "message", ec.getMessage()
-                            )
-                    )
-            );
-        }
+        similarityService.startAnalysisAsync(assignmentId, studentId, submissionId);
+
+        // HTTP 표준 사용: 202 Accepted 권장(또는 200 OK)
+        return ResponseEntity.accepted().body(
+                Map.of("status", 202, "success", true, "message", Map.of("accepted", true))
+                // 혹은 Map.of("status", 202, "success", true, "message", Map.of("status", "READY"))
+        );
+    }
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> status(
+            @RequestParam Integer assignmentId,
+            @RequestParam Integer studentId,
+            @RequestParam Integer submissionId
+    ) {
+        var ar = similarityService.status(assignmentId, studentId, submissionId);
+        return ResponseEntity.ok(
+                Map.of("status", 200, "success", true, "message", Map.of("status", ar.getStatus().name()))
+        );
     }
 }

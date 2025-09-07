@@ -8,7 +8,16 @@ import java.util.Optional;
 public interface ResultDocRepository extends MongoRepository<ResultDoc, String> {
     Optional<ResultDoc> findBySubmissionId(Integer submissionId);
 
-    List<ResultDoc> findAllByAssignmentIdAndSubmissionIdGreaterThanOrderBySubmissionIdAsc(
+    List<ResultDoc> findAllByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNotNullOrderBySubmissionIdAsc(
             Integer assignmentId, Integer submissionId
     );
+
+    int countByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNotNull(
+            Integer assignmentId, Integer submissionId
+    );
+
+    int countByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNull(
+            Integer assignmentId, Integer submissionId
+    );
+
 }

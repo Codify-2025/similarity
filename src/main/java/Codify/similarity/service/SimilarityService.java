@@ -13,15 +13,20 @@ import Codify.similarity.model.TreeNodeBuilder;
 import Codify.similarity.mongo.ResultDoc;
 import Codify.similarity.mongo.ResultDocRepository;
 import Codify.similarity.repository.ResultRepository;
+import Codify.similarity.service.dto.AnalysisResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SimilarityService {
@@ -29,28 +34,51 @@ public class SimilarityService {
     private final ResultDocRepository resultDocRepository; // Mongo
     private final ResultRepository resultRepository; // JPA
     private final ObjectMapper objectMapper;
+    private final AnalysisRuntimeRegistry runtime;
 
-    private static final double COSINE_THRESHOLD = 0.6;
+    private static final double COSINE_THRESHOLD = 0.8;
+    private static final long TIMEOUT_SEC = 300;     // 기본 5분, 추후 변경 가능성 O
 
+    // 비동기 처리
+    @Async("analysisExecutor")
     @Transactional
+    public void startAnalysisAsync(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
+        runtime.markStarted(assignmentId, fromStudentId, fromSubmissionId);
+        try {
+            // 실제 분석 실행
+            analyzeAndSave(assignmentId, fromStudentId, fromSubmissionId);
+        } catch (Exception e) {
+            runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
+            log.error("Async analysis failed: aId={}, subFrom={}", assignmentId, fromSubmissionId, e);
+            throw e;
+        }
+    }
+
     public void analyzeAndSave(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
         if (assignmentId == null || fromStudentId == null || fromSubmissionId == null) {
+            // 에러 로그
+            runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
             throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
         }
 
         // 1. 동일한 제출물 감지
         var fromSubmissionDoc = resultDocRepository.findBySubmissionId(fromSubmissionId)
-                .orElseThrow(SubmissionNotFoundException::new);
+                .orElseThrow(() -> {
+                    runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
+                    return new SubmissionNotFoundException();
+                });
         if (!Objects.equals(fromSubmissionDoc.getStudentId(), fromStudentId)) {
+            runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
             throw new StudentSubmissionMismatchException(); // 학번 != 제출물
         }
         if (!Objects.equals(fromSubmissionDoc.getAssignmentId(), assignmentId)){
+            runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
             throw new BaseException(ErrorCode.INVALID_INPUT_VALUE); // 과제 불일치
         }
 
         // 2. 같은 과제 & submissionId > Y
         var candidatesSubmission = resultDocRepository
-                .findAllByAssignmentIdAndSubmissionIdGreaterThanOrderBySubmissionIdAsc(
+                .findAllByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNotNullOrderBySubmissionIdAsc( // AST 없으면 분석 X
                         assignmentId, fromSubmissionId
                 );
 
@@ -60,7 +88,7 @@ public class SimilarityService {
 
         // for 루프
         for(ResultDoc candidates : candidatesSubmission) {
-            if (candidates.getAst() == null) continue;
+            // if (candidates.getAst() == null) continue;
             JsonNode candidatesJson = toJsonNode(candidates.getAst());
             double cosine = CosineSimilarity.calculate(fromVec, ASTVectorizer.buildTypeVector(candidatesJson));
 
@@ -74,15 +102,52 @@ public class SimilarityService {
             }
 
             // Result 저장 — accumulateResult = normalized
-            Result result = new Result();
-            result.setStudentFromId(fromStudentId.longValue());
-            result.setSubmissionFromId(fromSubmissionId.longValue());
-            result.setStudentToId(candidates.getStudentId().longValue());
-            result.setSubmissionToId(candidates.getSubmissionId().longValue());
-            result.setAccumulateResult(normalized != null ? normalized : 0.0);
+            Result result = Result.builder()
+                    .studentFromId(fromStudentId.longValue())
+                    .submissionFromId(fromSubmissionId.longValue())
+                    .studentToId(candidates.getStudentId().longValue())
+                    .submissionToId(candidates.getSubmissionId().longValue())
+                    .accumulateResult(normalized != null ? normalized : 0.0)
+                    .assignmentId(assignmentId.longValue())
+                    .build();
 
             resultRepository.save(result);
+
+            runtime.markProgress(assignmentId, fromStudentId, fromSubmissionId);
         }
+    }
+
+    // status 폴링
+    // total = AST 존재 & submissionId > Y인 수
+    // done = 유사도 분석 수행 완료 후 DB에 저장된 결과 수
+    // skipped = AST 없어서 skip한 갯수
+    @Transactional(readOnly = true)
+    public AnalysisResult status(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
+        int total   = resultDocRepository
+                .countByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNotNull(assignmentId, fromSubmissionId);
+        int done    = resultRepository
+                .countByAssignmentIdAndSubmissionFromId(assignmentId.longValue(), fromSubmissionId.longValue());
+        int skipped = resultDocRepository
+                .countByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNull(assignmentId, fromSubmissionId);
+
+        // DONE
+        if (total == 0 || done >= total) {
+            runtime.clear(assignmentId, fromStudentId, fromSubmissionId);
+            return new AnalysisResult(AnalysisResult.Status.DONE, total, done, skipped);
+        }
+
+        // 비동기 중 에러가 기록됐으면 ERROR
+        if (runtime.getLastErrorAt(assignmentId, fromStudentId, fromSubmissionId).isPresent()) {
+            return new AnalysisResult(AnalysisResult.Status.ERROR, total, done, skipped);
+        }
+
+        // 타임아웃 체크: lastProgressAt 없으면 startedAt 기준
+        var lastActivity = runtime.getLastProgressAt(assignmentId, fromStudentId, fromSubmissionId)
+                .or(() -> runtime.getStartedAt(assignmentId, fromStudentId, fromSubmissionId))
+                .orElseGet(Instant::now);
+
+        boolean timeout = lastActivity.plusSeconds(TIMEOUT_SEC).isBefore(Instant.now());
+        return new AnalysisResult(timeout ? AnalysisResult.Status.ERROR : AnalysisResult.Status.READY, total, done, skipped);
     }
 
     private JsonNode toJsonNode(Object ast) {

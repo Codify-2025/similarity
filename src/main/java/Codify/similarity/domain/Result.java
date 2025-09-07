@@ -1,12 +1,13 @@
 package Codify.similarity.domain;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 @Entity
 @Getter
-@Setter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@Builder
 @Table(name = "Result")
 public class Result {
     @Id
@@ -28,4 +29,7 @@ public class Result {
 
     @Column(name = "accumulateResult")
     private double accumulateResult;
+
+    @Column(name = "assignmentId")
+    private Long assignmentId;
 }

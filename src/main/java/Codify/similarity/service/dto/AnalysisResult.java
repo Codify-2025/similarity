@@ -7,8 +7,13 @@ import lombok.Getter;
 @AllArgsConstructor
 public class AnalysisResult {
     public enum Status { READY, DONE, ERROR }
+
     private final Status status;
-    private final Double cosine;     // DONE일 때만
-    private final Integer ted;
-    private final Double normalized;
+    private final Integer total;     // DONE일 때만
+    private final Integer done;
+    private final Integer skipped;
+
+    public AnalysisResult(Status status) {
+        this(status, null, null, null);
+    }
 }
