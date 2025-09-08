@@ -3,6 +3,8 @@ package Codify.similarity.service;
 import Codify.similarity.domain.Result;
 import Codify.similarity.exception.ErrorCode;
 import Codify.similarity.exception.baseException.BaseException;
+import Codify.similarity.exception.submissionexception.SameStudentComparisonException;
+import Codify.similarity.exception.submissionexception.SameSubmissionComparisonException;
 import Codify.similarity.exception.submissionexception.StudentSubmissionMismatchException;
 import Codify.similarity.exception.submissionexception.SubmissionNotFoundException;
 import Codify.similarity.model.TreeNode;
@@ -18,7 +20,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,20 +41,26 @@ public class SimilarityService {
     private static final long TIMEOUT_SEC = 300;     // 기본 5분, 추후 변경 가능성 O
 
     // 비동기 처리
-    @Async("analysisExecutor")
+    /*@Async("analysisExecutor")
     @Transactional
-    public void startAnalysisAsync(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
-        runtime.markStarted(assignmentId, fromStudentId, fromSubmissionId);
+    public void startAnalysisAsync(Integer assignmentId, Integer submissionId) {
+        var doc = resultDocRepository.findBySubmissionId(submissionId)
+                .orElseThrow(SubmissionNotFoundException::new);
+
+        var studentId = doc.getStudentId();
+
+        runtime.markStarted(assignmentId, studentId, submissionId);
         try {
             // 실제 분석 실행
-            analyzeAndSave(assignmentId, fromStudentId, fromSubmissionId);
+            analyzeAndSave(assignmentId, studentId, submissionId);
         } catch (Exception e) {
-            runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
-            log.error("Async analysis failed: aId={}, subFrom={}", assignmentId, fromSubmissionId, e);
+            runtime.markError(assignmentId, studentId, submissionId);
+            log.error("Async analysis failed: aId={}, subFrom={}", assignmentId, submissionId, e);
             throw e;
         }
-    }
+    }*/
 
+    @Transactional
     public void analyzeAndSave(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
         if (assignmentId == null || fromStudentId == null || fromSubmissionId == null) {
             // 에러 로그
@@ -75,6 +82,10 @@ public class SimilarityService {
             runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
             throw new BaseException(ErrorCode.INVALID_INPUT_VALUE); // 과제 불일치
         }
+        if (fromSubmissionDoc.getAst() == null) {
+            runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
+            throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
+        }
 
         // 2. 같은 과제 & submissionId > Y
         var candidatesSubmission = resultDocRepository
@@ -88,7 +99,18 @@ public class SimilarityService {
 
         // for 루프
         for(ResultDoc candidates : candidatesSubmission) {
-            // if (candidates.getAst() == null) continue;
+            // 1. 같은 제출물 감지
+            if (Objects.equals(candidates.getSubmissionId(), fromSubmissionId)) {
+                runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
+                throw new SameSubmissionComparisonException();
+            }
+
+            // 2) 같은 학생의 제출물 감지
+            if (Objects.equals(candidates.getStudentId(), fromStudentId)) {
+                runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
+                throw new SameStudentComparisonException();
+            }
+
             JsonNode candidatesJson = toJsonNode(candidates.getAst());
             double cosine = CosineSimilarity.calculate(fromVec, ASTVectorizer.buildTypeVector(candidatesJson));
 

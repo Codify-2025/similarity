@@ -1,42 +1,38 @@
 package Codify.similarity.web.controller;
 
-import Codify.similarity.service.SimilarityService;
+import Codify.similarity.service.SimilarityBatchService;
+import Codify.similarity.web.dto.SimilarityStartResponseDto;
+import Codify.similarity.web.dto.SimilarityStatusResponseDto;
+import Codify.similarity.web.dto.SubmissionIdsRequestDto;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/similarity/assignments/{assignmentId}/submissions/{submissionId}")
+@RequestMapping("/api/similarity/assignments/{assignmentId}/submissions")
 public class SimilarityController {
 
-    private final SimilarityService similarityService;
+    // private final SimilarityService similarityService;
+    private final SimilarityBatchService batchService;
 
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> run(
-            @RequestParam Integer assignmentId,
-            @RequestParam Integer studentId,
-            @RequestParam Integer submissionId
+    @PostMapping("/batch")
+    public ResponseEntity<SimilarityStartResponseDto> run(
+            @PathVariable Integer assignmentId,
+            @RequestBody @Valid SubmissionIdsRequestDto req
     ) {
-        similarityService.startAnalysisAsync(assignmentId, studentId, submissionId);
-
-        // HTTP 표준 사용: 202 Accepted 권장(또는 200 OK)
         return ResponseEntity.accepted().body(
-                Map.of("status", 202, "success", true, "message", Map.of("accepted", true))
-                // 혹은 Map.of("status", 202, "success", true, "message", Map.of("status", "READY"))
+                batchService.start(assignmentId, req.submissionIds())
         );
     }
-    @GetMapping("/status")
-    public ResponseEntity<Map<String, Object>> status(
-            @RequestParam Integer assignmentId,
-            @RequestParam Integer studentId,
-            @RequestParam Integer submissionId
+    @GetMapping("/analyze")
+    public ResponseEntity<SimilarityStatusResponseDto> status(
+            @PathVariable Integer assignmentId,
+            @RequestParam(name = "ids") java.util.List<Integer> submissionIds
     ) {
-        var ar = similarityService.status(assignmentId, studentId, submissionId);
         return ResponseEntity.ok(
-                Map.of("status", 200, "success", true, "message", Map.of("status", ar.getStatus().name()))
+                batchService.status(assignmentId, submissionIds)
         );
     }
 }
