@@ -40,26 +40,6 @@ public class SimilarityService {
     private static final double COSINE_THRESHOLD = 0.8;
     private static final long TIMEOUT_SEC = 300;     // 기본 5분, 추후 변경 가능성 O
 
-    // 비동기 처리
-    /*@Async("analysisExecutor")
-    @Transactional
-    public void startAnalysisAsync(Integer assignmentId, Integer submissionId) {
-        var doc = resultDocRepository.findBySubmissionId(submissionId)
-                .orElseThrow(SubmissionNotFoundException::new);
-
-        var studentId = doc.getStudentId();
-
-        runtime.markStarted(assignmentId, studentId, submissionId);
-        try {
-            // 실제 분석 실행
-            analyzeAndSave(assignmentId, studentId, submissionId);
-        } catch (Exception e) {
-            runtime.markError(assignmentId, studentId, submissionId);
-            log.error("Async analysis failed: aId={}, subFrom={}", assignmentId, submissionId, e);
-            throw e;
-        }
-    }*/
-
     @Transactional
     public void analyzeAndSave(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
         if (assignmentId == null || fromStudentId == null || fromSubmissionId == null) {
@@ -133,7 +113,13 @@ public class SimilarityService {
                     .assignmentId(assignmentId.longValue())
                     .build();
 
-            resultRepository.save(result);
+            if (!resultRepository.existsByAssignmentIdAndSubmissionFromIdAndSubmissionToId(
+                    assignmentId.longValue(),
+                    fromSubmissionId.longValue(),
+                    candidates.getSubmissionId().longValue()
+            )) {
+                resultRepository.save(result);
+            }
 
             runtime.markProgress(assignmentId, fromStudentId, fromSubmissionId);
         }

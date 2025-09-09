@@ -3,6 +3,7 @@ package Codify.similarity.service;
 import Codify.similarity.exception.ErrorCode;
 import Codify.similarity.exception.baseException.BaseException;
 import Codify.similarity.exception.submissionexception.SubmissionNotFoundException;
+import Codify.similarity.mongo.ResultDoc;
 import Codify.similarity.mongo.ResultDocRepository;
 import Codify.similarity.service.dto.AnalysisResult;
 import Codify.similarity.web.dto.SimilarityStartResponseDto;
@@ -31,9 +32,21 @@ public class SimilarityBatchService {
         var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        for (Integer sid : ids) taskRunner.runOne(assignmentId, sid);
+        List<Integer> starts;
+        if (ids.size() == 1) {
+            Integer from = ids.get(0);
+            var docs = resultDocRepository
+                    .findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
+                            assignmentId, from);
+            var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
+            starts = (expanded.size() <= 1) ? List.of() : expanded.subList(0, expanded.size() - 1);
+        } else {
+            starts = ids;
+        }
 
-        return new SimilarityStartResponseDto(true, submissionIds.size(), ids.size(), ids);
+        for (Integer sid : starts) taskRunner.runOne(assignmentId, sid);
+
+        return new SimilarityStartResponseDto(true, submissionIds.size(), starts.size(), starts);
     }
 
     // status 집계
@@ -45,11 +58,23 @@ public class SimilarityBatchService {
         var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
+        List<Integer> starts;
+        if (ids.size() == 1) {
+            Integer from = ids.get(0);
+            var docs = resultDocRepository
+                    .findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
+                            assignmentId, from);
+            var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
+            starts = (expanded.size() <= 1) ? List.of() : expanded.subList(0, expanded.size() - 1);
+        } else {
+            starts = ids;
+        }
+
         int total = 0, done = 0, skipped = 0;
         var per = new ArrayList<SimilarityStatusResponseDto.PerSubmissionStatus>();
         var overall = AnalysisResult.Status.DONE;
 
-        for (Integer sid : ids) {
+        for (Integer sid : starts) {
             var doc = resultDocRepository.findBySubmissionId(sid)
                     .orElseThrow(SubmissionNotFoundException::new);
 

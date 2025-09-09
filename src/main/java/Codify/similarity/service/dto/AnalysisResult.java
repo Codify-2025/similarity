@@ -12,8 +12,4 @@ public class AnalysisResult {
     private final Integer total;     // DONE일 때만
     private final Integer done;
     private final Integer skipped;
-
-    public AnalysisResult(Status status) {
-        this(status, null, null, null);
-    }
 }

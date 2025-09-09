@@ -8,7 +8,13 @@ import lombok.*;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @Builder
-@Table(name = "Result")
+@Table(
+        name = "Result",
+        uniqueConstraints = @UniqueConstraint(
+        name = "uk_result_assignment_from_to",
+        columnNames = {"assignmentId", "submission_from_id", "submission_to_id"}
+    )
+)
 public class Result {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

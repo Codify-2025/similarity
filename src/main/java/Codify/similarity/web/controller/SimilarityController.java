@@ -4,6 +4,7 @@ import Codify.similarity.service.SimilarityBatchService;
 import Codify.similarity.web.dto.SimilarityStartResponseDto;
 import Codify.similarity.web.dto.SimilarityStatusResponseDto;
 import Codify.similarity.web.dto.SubmissionIdsRequestDto;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -14,25 +15,31 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/similarity/assignments/{assignmentId}/submissions")
 public class SimilarityController {
 
-    // private final SimilarityService similarityService;
     private final SimilarityBatchService batchService;
 
     @PostMapping("/batch")
     public ResponseEntity<SimilarityStartResponseDto> run(
             @PathVariable Integer assignmentId,
-            @RequestBody @Valid SubmissionIdsRequestDto req
+            @RequestBody @Valid SubmissionIdsRequestDto submissionIdsRequestDto
     ) {
         return ResponseEntity.accepted().body(
-                batchService.start(assignmentId, req.submissionIds())
+                batchService.start(assignmentId, submissionIdsRequestDto.submissionIds())
         );
     }
-    @GetMapping("/analyze")
-    public ResponseEntity<SimilarityStatusResponseDto> status(
+
+    @Operation(
+            operationId = "getSimilarityStatusFromOne",
+            summary = "상태 조회, ids 없이 사용",
+            description = """
+            제출물 번호 하나만 입력하면 됩니다. 
+            - 프론트가 ids를 구성하지 않아도 되는 간단 폴링용 엔드포인트입니다.
+            """
+    )
+    @GetMapping("/{submissionFromId}/analyze")
+    public ResponseEntity<SimilarityStatusResponseDto> statusFromOne(
             @PathVariable Integer assignmentId,
-            @RequestParam(name = "ids") java.util.List<Integer> submissionIds
+            @PathVariable Integer submissionFromId
     ) {
-        return ResponseEntity.ok(
-                batchService.status(assignmentId, submissionIds)
-        );
+        return ResponseEntity.ok(batchService.status(assignmentId, java.util.List.of(submissionFromId)));
     }
 }

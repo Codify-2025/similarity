@@ -12,6 +12,10 @@ public interface ResultDocRepository extends MongoRepository<ResultDoc, String> 
             Integer assignmentId, Integer submissionId
     );
 
+    List<ResultDoc> findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
+            Integer assignmentId, Integer submissionId
+    );
+
     int countByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNotNull(
             Integer assignmentId, Integer submissionId
     );
