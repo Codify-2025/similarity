@@ -14,7 +14,9 @@ public class ResultDoc {
     @Id
     private String id;
 
-    private Long submissionId;
-    private Long studentId;
+    private Integer submissionId;
+    private Integer studentId;
     private Object ast;
+
+    private Integer assignmentId;
 }
