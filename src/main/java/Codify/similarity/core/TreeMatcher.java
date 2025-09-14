@@ -522,6 +522,7 @@ public final class TreeMatcher {
                         current.fs(), current.fe(), current.ts(), current.te());
             }
         }
+
         log.debug("Resolved to {} total segments", result.size());
         return result;
     }
