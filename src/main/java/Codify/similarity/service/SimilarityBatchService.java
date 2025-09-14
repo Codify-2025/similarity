@@ -23,6 +23,19 @@ public class SimilarityBatchService {
     private final SimilarityService similarityService;
     private final ResultDocRepository resultDocRepository;
 
+    // 중복되는 부분 공통 메서드로 추출
+    private List<Integer> determineStartSubmissions(final Integer assignmentId, final List<Integer> ids) {
+        if (ids.size() == 1) {
+            Integer from = ids.get(0);
+            var docs = resultDocRepository
+                    .findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
+                            assignmentId, from);
+            var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
+            return (expanded.size() <= 1) ? List.of() : expanded.subList(0, expanded.size() - 1);
+        }
+        return ids;
+    }
+
     // 비동기 실행
     @Transactional
     public SimilarityStartResponseDto start(final Integer assignmentId, final List<Integer> submissionIds) {
@@ -32,17 +45,7 @@ public class SimilarityBatchService {
         final var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        final List<Integer> starts;
-        if (ids.size() == 1) {
-            Integer from = ids.get(0);
-            var docs = resultDocRepository
-                    .findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
-                            assignmentId, from);
-            var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
-            starts = (expanded.size() <= 1) ? List.of() : expanded.subList(0, expanded.size() - 1);
-        } else {
-            starts = ids;
-        }
+        final List<Integer> starts = determineStartSubmissions(assignmentId, ids);
 
         for (Integer sid : starts) taskRunner.runOne(assignmentId, sid);
 
@@ -58,17 +61,7 @@ public class SimilarityBatchService {
         final var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        final List<Integer> starts;
-        if (ids.size() == 1) {
-            final Integer from = ids.get(0);
-            final var docs = resultDocRepository
-                    .findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
-                            assignmentId, from);
-            final var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
-            starts = (expanded.size() <= 1) ? List.of() : expanded.subList(0, expanded.size() - 1);
-        } else {
-            starts = ids;
-        }
+        final List<Integer> starts = determineStartSubmissions(assignmentId, ids);
 
         int total = 0, done = 0, skipped = 0;
         var per = new ArrayList<SimilarityStatusResponseDto.PerSubmissionStatus>();
