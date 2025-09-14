@@ -19,8 +19,8 @@ public class SimilarityController {
 
     @PostMapping("/batch")
     public ResponseEntity<SimilarityStartResponseDto> run(
-            @PathVariable Integer assignmentId,
-            @RequestBody @Valid SubmissionIdsRequestDto submissionIdsRequestDto
+            @PathVariable final Integer assignmentId,
+            @RequestBody @Valid final SubmissionIdsRequestDto submissionIdsRequestDto
     ) {
         return ResponseEntity.accepted().body(
                 batchService.start(assignmentId, submissionIdsRequestDto.submissionIds())
@@ -37,8 +37,8 @@ public class SimilarityController {
     )
     @GetMapping("/{submissionFromId}/analyze")
     public ResponseEntity<SimilarityStatusResponseDto> statusFromOne(
-            @PathVariable Integer assignmentId,
-            @PathVariable Integer submissionFromId
+            @PathVariable final Integer assignmentId,
+            @PathVariable final Integer submissionFromId
     ) {
         return ResponseEntity.ok(batchService.status(assignmentId, java.util.List.of(submissionFromId)));
     }

@@ -18,11 +18,11 @@ public class SimilarityTaskRunner {
 
     @Async("analysisExecutor")
     @Transactional
-    public void runOne(Integer assignmentId, Integer submissionId) {
-        var doc = resultDocRepository.findBySubmissionId(submissionId)
+    public void runOne(final Integer assignmentId, final Integer submissionId) {
+        final var doc = resultDocRepository.findBySubmissionId(submissionId)
                 .orElseThrow(SubmissionNotFoundException::new);
 
-        var studentId = doc.getStudentId();
+        final var studentId = doc.getStudentId();
         runtime.markStarted(assignmentId, studentId, submissionId);
         try {
             similarityService.analyzeAndSave(assignmentId, studentId, submissionId);

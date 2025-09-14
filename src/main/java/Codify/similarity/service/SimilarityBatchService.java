@@ -25,14 +25,14 @@ public class SimilarityBatchService {
 
     // 비동기 실행
     @Transactional
-    public SimilarityStartResponseDto start(Integer assignmentId, List<Integer> submissionIds) {
+    public SimilarityStartResponseDto start(final Integer assignmentId, final List<Integer> submissionIds) {
         if (submissionIds == null || submissionIds.isEmpty())
             throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
+        final var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        List<Integer> starts;
+        final List<Integer> starts;
         if (ids.size() == 1) {
             Integer from = ids.get(0);
             var docs = resultDocRepository
@@ -51,20 +51,20 @@ public class SimilarityBatchService {
 
     // status 집계
     @Transactional(readOnly = true)
-    public SimilarityStatusResponseDto status(Integer assignmentId, List<Integer> submissionIds) {
+    public SimilarityStatusResponseDto status(final Integer assignmentId, final List<Integer> submissionIds) {
         if (submissionIds == null || submissionIds.isEmpty())
             throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
+        final var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
 
-        List<Integer> starts;
+        final List<Integer> starts;
         if (ids.size() == 1) {
-            Integer from = ids.get(0);
-            var docs = resultDocRepository
+            final Integer from = ids.get(0);
+            final var docs = resultDocRepository
                     .findAllByAssignmentIdAndSubmissionIdGreaterThanEqualAndAstIsNotNullOrderBySubmissionIdAsc(
                             assignmentId, from);
-            var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
+            final var expanded = docs.stream().map(ResultDoc::getSubmissionId).toList();
             starts = (expanded.size() <= 1) ? List.of() : expanded.subList(0, expanded.size() - 1);
         } else {
             starts = ids;

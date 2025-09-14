@@ -1,5 +1,6 @@
 package Codify.similarity.service;
 
+import Codify.similarity.core.TreeMatcher;
 import Codify.similarity.domain.Result;
 import Codify.similarity.exception.ErrorCode;
 import Codify.similarity.exception.baseException.BaseException;
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -39,6 +41,8 @@ public class SimilarityService {
 
     private static final double COSINE_THRESHOLD = 0.8;
     private static final long TIMEOUT_SEC = 300;     // 기본 5분, 추후 변경 가능성 O
+
+    private final CodelineService codelineService;
 
     @Transactional
     public void analyzeAndSave(Integer assignmentId, Integer fromStudentId, Integer fromSubmissionId) {
@@ -85,7 +89,7 @@ public class SimilarityService {
                 throw new SameSubmissionComparisonException();
             }
 
-            // 2) 같은 학생의 제출물 감지
+            // 2. 같은 학생의 제출물 감지
             if (Objects.equals(candidates.getStudentId(), fromStudentId)) {
                 runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
                 throw new SameStudentComparisonException();
@@ -94,34 +98,70 @@ public class SimilarityService {
             JsonNode candidatesJson = toJsonNode(candidates.getAst());
             double cosine = CosineSimilarity.calculate(fromVec, ASTVectorizer.buildTypeVector(candidatesJson));
 
-            Double normalized = null;
+                Double normalized = null;
+                List<TreeMatcher.Seg> segs = java.util.Collections.emptyList();
+
             if (cosine >= COSINE_THRESHOLD) {
                 if (fromTree == null) fromTree = TreeNodeBuilder.fromJson(fromJson);
                 TreeNode candidatesTree = TreeNodeBuilder.fromJson(candidatesJson);
                 int ted = TreeEditDistance.compute(fromTree, candidatesTree);
                 int maxSize = Math.max(countNodes(fromTree), countNodes(candidatesTree));
                 normalized = 1.0 - ((double) ted / maxSize);
+
+                // 개선된 매칭 사용 (구조적 유사성 고려)
+                var matches = TreeMatcher.match(fromTree, candidatesTree);
+                segs = TreeMatcher.toSegments(matches, /*minLines=*/2);
+                
+                // 디버깅 로그 추가
+                log.info("Matching {} vs {}: cosine={}, normalized={}, matches={}, segs={}", 
+                    fromSubmissionId, candidates.getSubmissionId(), 
+                    cosine, normalized, matches.size(), segs.size());
+                for (var seg : segs) {
+                    log.info("  Segment: from[{}-{}] to[{}-{}]", 
+                        seg.fs(), seg.fe(), seg.ts(), seg.te());
+                }
             }
 
-            // Result 저장 — accumulateResult = normalized
-            Result result = Result.builder()
-                    .studentFromId(fromStudentId.longValue())
-                    .submissionFromId(fromSubmissionId.longValue())
-                    .studentToId(candidates.getStudentId().longValue())
-                    .submissionToId(candidates.getSubmissionId().longValue())
-                    .accumulateResult(normalized != null ? normalized : 0.0)
-                    .assignmentId(assignmentId.longValue())
-                    .build();
+            try {
+                // Result 저장 — accumulateResult = normalized
+                Result result = Result.builder()
+                        .studentFromId(fromStudentId.longValue())
+                        .submissionFromId(fromSubmissionId.longValue())
+                        .studentToId(candidates.getStudentId().longValue())
+                        .submissionToId(candidates.getSubmissionId().longValue())
+                        .accumulateResult(normalized != null ? normalized : 0.0)
+                        .assignmentId(assignmentId.longValue())
+                        .build();
 
-            if (!resultRepository.existsByAssignmentIdAndSubmissionFromIdAndSubmissionToId(
-                    assignmentId.longValue(),
-                    fromSubmissionId.longValue(),
-                    candidates.getSubmissionId().longValue()
-            )) {
-                resultRepository.save(result);
+                Result saved = resultRepository
+                        .findByAssignmentIdAndSubmissionFromIdAndSubmissionToId(
+                                assignmentId.longValue(),
+                                fromSubmissionId.longValue(),
+                                candidates.getSubmissionId().longValue()
+                        )
+                        .orElseGet(() -> resultRepository.save(result));
+
+                if (!segs.isEmpty()) {
+                    try {
+                        codelineService.saveMergedRanges(
+                                saved.getId(),
+                                fromStudentId.longValue(),
+                                candidates.getStudentId().longValue(),
+                                segs
+                        );
+                    } catch (Exception e) {
+                        log.warn("Codeline 저장 실패 - Result는 유지됨. resultId={}", saved.getId(), e);
+                    }
+                }
+                runtime.markProgress(assignmentId, fromStudentId, fromSubmissionId);
             }
-
-            runtime.markProgress(assignmentId, fromStudentId, fromSubmissionId);
+            catch (org.springframework.dao.DataAccessException e) {
+                // 3. Result 저장(또는 조회) 자체가 실패한 케이스 → Codeline 시도하지 않음
+                runtime.markError(assignmentId, fromStudentId, fromSubmissionId);
+                log.error("Result 저장/조회 실패 → 이 페어는 스킵. assignmentId={}, fromSub={}, toSub={}",
+                        assignmentId, fromSubmissionId, candidates.getSubmissionId(), e);
+                // continue; // 다음 후보로 넘어감(배치 계속)
+            }
         }
     }
 
