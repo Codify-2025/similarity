@@ -53,93 +53,131 @@ public final class TreeMatcher {
         // 구조적 유사성 기반 rename 비용 계산
         int rc = calculateStructuralCost(a, b);
 
-        // 자식 배열 정렬 DP
+        // 1. DP 테이블 구축
+        Cell[][] dp = buildDpTable(a, b, depth);
+
+        // 2. 역추적으로 매칭 수집
+        List<Match> childMatches = backtrackMatches(dp, a, b);
+
+        // 3. 현재 노드 매칭 여부 판단
+        if (shouldMatchNodes(a, b, rc, depth)) {
+            childMatches.add(new Match(a, b));
+            logMatchResult(a, b, true);
+        } else {
+            logMatchResult(a, b, false);
+        }
+        return childMatches;
+    }
+
+    // DP 테이블 구축
+    private static Cell[][] buildDpTable(TreeNode a, TreeNode b, int depth) {
         var m = a.children.size();
         var n = b.children.size();
         Cell[][] dp = new Cell[m+1][n+1];
+
+        // 초기화
         dp[0][0] = new Cell(0, null, -1, -1, new ArrayList<>());
 
-        for (int i=1;i<=m;i++) {
+        for (int i=1; i<=m; i++) {
             dp[i][0] = new Cell(dp[i-1][0].cost + EditCost.deleteCost(a.children.get(i-1)),
                     Op.DEL, i-1, 0, List.of());
         }
-        for (int j=1;j<=n;j++) {
+        for (int j=1; j<=n; j++) {
             dp[0][j] = new Cell(dp[0][j-1].cost + EditCost.insertCost(b.children.get(j-1)),
                     Op.INS, 0, j-1, List.of());
         }
 
-        for (int i=1;i<=m;i++) {
-            for (int j=1;j<=n;j++) {
-                int del = dp[i-1][j].cost + EditCost.deleteCost(a.children.get(i-1));
-                int ins = dp[i][j-1].cost + EditCost.insertCost(b.children.get(j-1));
-
-                // 재귀적으로 자식 매칭
-                List<Match> sub = matchNode(a.children.get(i-1), b.children.get(j-1), depth+1);
-
-                // 구조적 유사성 기반 비용 계산
-                int renCost = calculateTreeEditCost(a.children.get(i-1), b.children.get(j-1));
-
-                // 최소 선택
-                if (renCost + dp[i-1][j-1].cost <= del && renCost + dp[i-1][j-1].cost <= ins) {
-                    dp[i][j] = new Cell(renCost + dp[i-1][j-1].cost, Op.REN, i-1, j-1, sub);
-                } else if (del <= ins) {
-                    dp[i][j] = new Cell(del, Op.DEL, i-1, j, List.of());
-                } else {
-                    dp[i][j] = new Cell(ins, Op.INS, i, j-1, List.of());
-                }
+        // DP 테이블 채우기
+        for (int i=1; i<=m; i++) {
+            for (int j=1; j<=n; j++) {
+                fillDpCell(dp, i, j, a, b, depth);
             }
         }
 
-        // 역추적 + 자기 자신 매칭 추가
-        List<Match> out = new ArrayList<>();
-        int i=m, j=n;
-        while (i>0 || j>0) {
+        return dp;
+    }
+
+    // DP 셀 채우기
+    private static void fillDpCell(Cell[][] dp, int i, int j, TreeNode a, TreeNode b, int depth) {
+        int del = dp[i-1][j].cost + EditCost.deleteCost(a.children.get(i-1));
+        int ins = dp[i][j-1].cost + EditCost.insertCost(b.children.get(j-1));
+
+        // 재귀적으로 자식 매칭
+        List<Match> sub = matchNode(a.children.get(i-1), b.children.get(j-1), depth+1);
+        int renCost = calculateTreeEditCost(a.children.get(i-1), b.children.get(j-1));
+
+        // 최소 비용 선택
+        if (renCost + dp[i-1][j-1].cost <= del && renCost + dp[i-1][j-1].cost <= ins) {
+            dp[i][j] = new Cell(renCost + dp[i-1][j-1].cost, Op.REN, i-1, j-1, sub);
+        } else if (del <= ins) {
+            dp[i][j] = new Cell(del, Op.DEL, i-1, j, List.of());
+        } else {
+            dp[i][j] = new Cell(ins, Op.INS, i, j-1, List.of());
+        }
+    }
+
+    // 역추적
+    private static List<Match> backtrackMatches(Cell[][] dp, TreeNode a, TreeNode b) {
+        List<Match> matches = new ArrayList<>();
+        int m = a.children.size();
+        int n = b.children.size();
+        int i = m, j = n;
+
+        while (i > 0 || j > 0) {
             Cell c = dp[i][j];
             if (c.op == Op.REN) {
-                out.addAll(c.matches);
-                i = c.iPrev; j = c.jPrev;
+                matches.addAll(c.matches);
+                i = c.iPrev;
+                j = c.jPrev;
             } else if (c.op == Op.DEL) {
-                i = c.iPrev; j = c.jPrev;
+                i = c.iPrev;
+                j = c.jPrev;
             } else { // INS
-                i = c.iPrev; j = c.jPrev;
+                i = c.iPrev;
+                j = c.jPrev;
             }
         }
 
-        // 매칭 조건 개선
+        return matches;
+    }
+
+    // 매칭 조건 판단
+    private static boolean shouldMatchNodes(TreeNode a, TreeNode b, int rc, int depth) {
         boolean isRoot = "CompilationUnit".equals(a.label) && "CompilationUnit".equals(b.label);
-        boolean shouldMatch = false;
 
-        if (!isRoot && a.minLine >= 1 && b.minLine >= 1) {
-            // 1. 라벨이 완전히 같은 경우
-            if (rc == 0) {
-                shouldMatch = true;
-            }
-            // 2. 구조적으로 유사한 타입인 경우
-            else if (STRUCTURAL_TYPES.contains(a.label) && a.label.equals(b.label)) {
-                // 같은 구조 타입이면 내용이 달라도 매칭
-                shouldMatch = true;
-                log.debug("Structural match: {} at [{}-{}] with {} at [{}-{}]",
-                        a.label, a.minLine, a.maxLine, b.label, b.minLine, b.maxLine);
-            }
-            // 3. 이름 독립적인 타입인 경우
-            else if (NAME_INDEPENDENT_TYPES.contains(a.label) && a.label.equals(b.label)) {
-                shouldMatch = true;
-            }
+        if (isRoot || a.minLine < 1 || b.minLine < 1) {
+            return false;
         }
 
-        if (shouldMatch) {
-            // MethodDeclaration 매칭 결과 로그
-            if ("MethodDeclaration".equals(a.label)) {
-                log.info("MethodDeclaration MATCHED: [{}-{}] <-> [{}-{}]", 
-                    a.minLine, a.maxLine, b.minLine, b.maxLine);
-            }
-
-            out.add(new Match(a, b));
-        } else if ("MethodDeclaration".equals(a.label) && "MethodDeclaration".equals(b.label)) {
-            log.warn("MethodDeclaration NOT MATCHED: [{}-{}] <-> [{}-{}] (rc: {})", 
-                a.minLine, a.maxLine, b.minLine, b.maxLine, rc);
+        // 1. 라벨이 완전히 같은 경우
+        if (rc == 0) {
+            return true;
         }
-        return out;
+
+        // 2. 구조적으로 유사한 타입인 경우
+        if (STRUCTURAL_TYPES.contains(a.label) && a.label.equals(b.label)) {
+            return true;
+        }
+
+        // 3. 이름 독립적인 타입인 경우
+        if (NAME_INDEPENDENT_TYPES.contains(a.label) && a.label.equals(b.label)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    // 로깅
+    private static void logMatchResult(TreeNode a, TreeNode b, boolean matched) {
+        if ("MethodDeclaration".equals(a.label)) {
+            if (matched) {
+                log.info("MethodDeclaration MATCHED: [{}-{}] <-> [{}-{}]",
+                        a.minLine, a.maxLine, b.minLine, b.maxLine);
+            } else {
+                log.warn("MethodDeclaration NOT MATCHED: [{}-{}] <-> [{}-{}]",
+                        a.minLine, a.maxLine, b.minLine, b.maxLine);
+            }
+        }
     }
 
     // 구조적 유사성 기반 비용 계산
