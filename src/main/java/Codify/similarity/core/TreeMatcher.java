@@ -350,7 +350,7 @@ public final class TreeMatcher {
 
     public static List<Seg> toSegments(List<Match> matches, int minLen) {
         List<Seg> segs = new ArrayList<>();
-        log.info("Converting {} matches to segments (minLen={})", matches.size(), minLen);
+        log.debug("Converting {} matches to segments (minLen={})", matches.size(), minLen);
 
         for (Match m : matches) {
             int a1 = m.a.minLine, a2 = m.a.maxLine;
@@ -366,8 +366,7 @@ public final class TreeMatcher {
                 
                 if (len >= minLen || isImportantNode) {
                     segs.add(new Seg(a1, a2, b1, b2));
-                    log.info("Added segment: from[{}-{}] to[{}-{}] (len={})", 
-                        a1, a2, b1, b2, len);
+                    log.debug("Added segment: from[{}-{}] to[{}-{}] (len={})", a1, a2, b1, b2, len);
                     
                     // 특별히 5-6 <-> 9-10 매칭 추적
                     if ((a1 == 5 && a2 == 6 && b1 == 9 && b2 == 10)) {
@@ -380,17 +379,17 @@ public final class TreeMatcher {
             }
         }
         
-        log.info("Total segments created before overlap resolution: {}", segs.size());
+        log.debug("Total segments created before overlap resolution: {}", segs.size());
         
         // 단순한 중복 해결 로직
         List<Seg> resolvedSegs = resolveOverlappingSegmentsSimple(segs);
-        log.info("Total segments after resolving overlaps: {}", resolvedSegs.size());
+        log.debug("Total segments after resolving overlaps: {}", resolvedSegs.size());
         return resolvedSegs;
     }
 
     private static List<Seg> resolveOverlappingSegmentsSimple(List<Seg> segments) {
-        log.info("=== RESOLVING OVERLAPPING SEGMENTS START ===");
-        log.info("Input segments count: {}", segments.size());
+        log.debug("=== RESOLVING OVERLAPPING SEGMENTS START ===");
+        log.debug("Input segments count: {}", segments.size());
 
         // 시작 라인 순으로 정렬
         List<Seg> sorted = segments.stream()
@@ -427,7 +426,7 @@ public final class TreeMatcher {
             }
         }
         
-        log.info("Resolved to {} total segments", result.size());
+        log.debug("Resolved to {} total segments", result.size());
         return result;
     }
 
