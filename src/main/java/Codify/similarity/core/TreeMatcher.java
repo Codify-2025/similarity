@@ -11,7 +11,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public final class TreeMatcher {
-    // SimilarityLevel 제거 - 단순한 매칭
     public record Match(TreeNode a, TreeNode b) {}
     public record Seg(int fs, int fe, int ts, int te) {}
 
@@ -46,7 +45,17 @@ public final class TreeMatcher {
         // span 보장
         A.computeSpan();
         B.computeSpan();
-        return matchNode(A, B, 0);
+        // return matchNode(A, B, 0);
+
+        // 함수 매칭 수집
+        // 1. 기존 DP 최적 경로 매칭
+        List<Match> optimalMatches = matchNode(A, B, 0);
+
+        // 2. MethodDeclaration 모든 매칭 추가 수집
+        List<Match> methodMatches = collectAllMethodMatches(A, B);
+
+        // 3. 합치기 (중복 제거)
+        return mergeMatches(optimalMatches, methodMatches);
     }
 
     private static List<Match> matchNode(TreeNode a, TreeNode b, int depth) {
@@ -62,8 +71,20 @@ public final class TreeMatcher {
         // 3. 현재 노드 매칭 여부 판단
         if (shouldMatchNodes(a, b, rc, depth)) {
             childMatches.add(new Match(a, b));
+
+            // 매칭 누락 오류 해결: MethodDeclaration 매칭 추적
+            if ("MethodDeclaration".equals(a.label)) {
+                log.warn("*** METHOD MATCH CREATED: [{}-{}] <-> [{}-{}], rc: {} ***",
+                        a.minLine, a.maxLine, b.minLine, b.maxLine, rc);
+            }
             logMatchResult(a, b, true);
         } else {
+
+            // 매칭 누락 오류 해결: MethodDeclaration 매칭 실패 추적
+            if ("MethodDeclaration".equals(a.label)) {
+                log.warn("*** METHOD MATCH FAILED: [{}-{}] <-> [{}-{}], rc: {}, reason: shouldMatch=false ***",
+                        a.minLine, a.maxLine, b.minLine, b.maxLine, rc);
+            }
             logMatchResult(a, b, false);
         }
         return childMatches;
@@ -156,6 +177,10 @@ public final class TreeMatcher {
 
         // 2. 구조적으로 유사한 타입인 경우
         if (STRUCTURAL_TYPES.contains(a.label) && a.label.equals(b.label)) {
+            // 함수 매칭 오류 해결
+            if ("MethodDeclaration".equals(a.label)) {
+                return isMethodContentSimilar(a, b);
+            }
             return true;
         }
 
@@ -165,6 +190,75 @@ public final class TreeMatcher {
         }
 
         return false;
+    }
+
+    private static boolean isMethodContentSimilar(TreeNode a, TreeNode b) {
+        // 1. 파라미터 개수 비교
+        int paramCountA = getParameterCount(a);
+        int paramCountB = getParameterCount(b);
+        if (paramCountA != paramCountB) {
+            log.debug("Method parameter count differs: {} vs {}", paramCountA, paramCountB);
+            return false;
+        }
+
+        // 2. 리턴 타입 비교
+        String returnTypeA = getReturnType(a);
+        String returnTypeB = getReturnType(b);
+        if (!returnTypeA.equals(returnTypeB)) {
+            log.debug("Method return type differs: {} vs {}", returnTypeA, returnTypeB);
+            return false;
+        }
+
+        // 3. 함수 바디의 연산자 패턴 비교
+        List<String> operatorsA = extractOperators(a);
+        List<String> operatorsB = extractOperators(b);
+
+        // 연산자가 완전히 같아야 함
+        if (!operatorsA.equals(operatorsB)) {
+            log.debug("Method operators differ: {} vs {}", operatorsA, operatorsB);
+            return false;
+        }
+
+        log.debug("Method content is similar: [{}-{}] <-> [{}-{}]",
+                a.minLine, a.maxLine, b.minLine, b.maxLine);
+        return true;
+    }
+
+    private static int getParameterCount(TreeNode methodNode) {
+        // ParameterList 찾기
+        for (TreeNode child : methodNode.children) {
+            if ("ParameterList".equals(child.label)) {
+                return child.children.size();
+            }
+        }
+        return 0;
+    }
+
+    private static String getReturnType(TreeNode methodNode) {
+        // 첫 번째 Type 노드가 리턴 타입
+        for (TreeNode child : methodNode.children) {
+            if ("Type".equals(child.label)) {
+                return child.toString(); // 또는 적절한 타입 추출 로직
+            }
+        }
+        return "void";
+    }
+
+    private static List<String> extractOperators(TreeNode node) {
+        List<String> operators = new ArrayList<>();
+        extractOperatorsRecursive(node, operators);
+        return operators;
+    }
+
+    private static void extractOperatorsRecursive(TreeNode node, List<String> operators) {
+        if ("Operator".equals(node.label)) {
+            // 연산자 텍스트 추출 (node.value 또는 적절한 방법으로)
+            operators.add(node.toString()); // 실제 연산자 값으로 변경 필요
+        }
+
+        for (TreeNode child : node.children) {
+            extractOperatorsRecursive(child, operators);
+        }
     }
 
     // 로깅
@@ -352,6 +446,11 @@ public final class TreeMatcher {
         List<Seg> segs = new ArrayList<>();
         log.debug("Converting {} matches to segments (minLen={})", matches.size(), minLen);
 
+        // 매칭 누락 오류 해결: MethodDeclaration 매칭들 확인
+        long methodMatches = matches.stream()
+                .filter(m -> "MethodDeclaration".equals(m.a.label))
+                .count();
+
         for (Match m : matches) {
             int a1 = m.a.minLine, a2 = m.a.maxLine;
             int b1 = m.b.minLine, b2 = m.b.maxLine;
@@ -363,15 +462,11 @@ public final class TreeMatcher {
                 boolean isImportantNode = "MethodDeclaration".equals(m.a.label) || 
                                         "FunctionDeclaration".equals(m.a.label) ||
                                         "ClassDeclaration".equals(m.a.label);
-                
+
                 if (len >= minLen || isImportantNode) {
                     segs.add(new Seg(a1, a2, b1, b2));
                     log.debug("Added segment: from[{}-{}] to[{}-{}] (len={})", a1, a2, b1, b2, len);
-                    
-                    // 특별히 5-6 <-> 9-10 매칭 추적
-                    if ((a1 == 5 && a2 == 6 && b1 == 9 && b2 == 10)) {
-                        log.warn("*** 5-6 <-> 9-10 SEGMENT ADDED! ***");
-                    }
+
                 } else {
                     log.warn("Skipped segment (len={} < minLen={}): {} [{}-{}] <-> {} [{}-{}]", 
                         len, minLen, m.a.label, a1, a2, m.b.label, b1, b2);
@@ -406,14 +501,14 @@ public final class TreeMatcher {
             for (Seg existing : result) {
                 if (isCompletelyContained(current, existing)) {
                     // current가 existing에 완전히 포함되면 추가하지 않음
-                    log.info("Skipping segment [{}-{}] - contained in [{}-{}]", 
+                    log.info("Skipping segment [{}-{}] - contained in [{}-{}]",
                         current.fs(), current.fe(), existing.fs(), existing.fe());
                     shouldAdd = false;
                     break;
                 } else if (isCompletelyContained(existing, current)) {
                     // existing이 current에 완전히 포함되면 existing 제거 예정
                     toRemove.add(existing);
-                    log.info("Removing segment [{}-{}] - contained in [{}-{}]", 
+                    log.info("Removing segment [{}-{}] - contained in [{}-{}]",
                         existing.fs(), existing.fe(), current.fs(), current.fe());
                 }
             }
@@ -423,9 +518,10 @@ public final class TreeMatcher {
             
             if (shouldAdd) {
                 result.add(current);
+                log.debug("*** SEGMENT KEPT: [{}-{}] <-> [{}-{}] ***",
+                        current.fs(), current.fe(), current.ts(), current.te());
             }
         }
-        
         log.debug("Resolved to {} total segments", result.size());
         return result;
     }
@@ -434,5 +530,59 @@ public final class TreeMatcher {
     private static boolean isCompletelyContained(Seg inner, Seg outer) {
         return inner.fs >= outer.fs && inner.fe <= outer.fe &&
                !(inner.fs == outer.fs && inner.fe == outer.fe);
+    }
+
+    // 여기서부터 함수 매칭 추가를 위한 메서드 추가
+    private static List<Match> collectAllMethodMatches(TreeNode a, TreeNode b) {
+        List<Match> methodMatches = new ArrayList<>();
+        List<TreeNode> methodsA = findAllMethods(a);
+        List<TreeNode> methodsB = findAllMethods(b);
+
+        for (TreeNode methodA : methodsA) {
+            for (TreeNode methodB : methodsB) {
+                if (shouldMatchNodes(methodA, methodB, calculateStructuralCost(methodA, methodB), 0)) {
+                    methodMatches.add(new Match(methodA, methodB));
+                    log.warn("*** COLLECTED METHOD MATCH: [{}-{}] <-> [{}-{}] ***",
+                            methodA.minLine, methodA.maxLine, methodB.minLine, methodB.maxLine);
+                }
+            }
+        }
+
+        return methodMatches;
+    }
+
+    private static List<TreeNode> findAllMethods(TreeNode node) {
+        List<TreeNode> methods = new ArrayList<>();
+
+        if ("MethodDeclaration".equals(node.label)) {
+            methods.add(node);
+        }
+
+        for (TreeNode child : node.children) {
+            methods.addAll(findAllMethods(child));
+        }
+
+        return methods;
+    }
+    private static List<Match> mergeMatches(List<Match> optimal, List<Match> additional) {
+        List<Match> result = new ArrayList<>(optimal);
+
+        for (Match additionalMatch : additional) {
+            boolean isDuplicate = optimal.stream().anyMatch(optimalMatch ->
+                    optimalMatch.a.minLine == additionalMatch.a.minLine &&
+                            optimalMatch.a.maxLine == additionalMatch.a.maxLine &&
+                            optimalMatch.b.minLine == additionalMatch.b.minLine &&
+                            optimalMatch.b.maxLine == additionalMatch.b.maxLine
+            );
+
+            if (!isDuplicate) {
+                result.add(additionalMatch);
+                log.warn("*** ADDED EXTRA METHOD MATCH: [{}-{}] <-> [{}-{}] ***",
+                        additionalMatch.a.minLine, additionalMatch.a.maxLine,
+                        additionalMatch.b.minLine, additionalMatch.b.maxLine);
+            }
+        }
+
+        return result;
     }
 }
