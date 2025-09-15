@@ -64,10 +64,11 @@ public final class TreeMatcher {
         List<Match> variableMatches = collectAllVariableMatches(A, B);
 
         // 6. 합치기 (중복 제거)
-        List<Match> result = mergeMatches(optimalMatches, methodMatches);
+        /*List<Match> result = mergeMatches(optimalMatches, methodMatches);
         result = mergeMatches(result, loopMatches);
         result = mergeMatches(result, conditionMatches);
-        return mergeMatches(result, variableMatches);
+        return mergeMatches(result, variableMatches);*/
+        return mergeAllMatches(optimalMatches, methodMatches, loopMatches, conditionMatches, variableMatches);
     }
 
     private static List<Match> matchNode(TreeNode a, TreeNode b, int depth) {
@@ -546,6 +547,20 @@ public final class TreeMatcher {
     }
 
     // 여기서부터 함수 매칭 추가를 위한 메서드 추가
+    private static List<TreeNode> findAllMethods(TreeNode node) {
+        List<TreeNode> methods = new ArrayList<>();
+
+        if ("MethodDeclaration".equals(node.label)) {
+            methods.add(node);
+        }
+
+        for (TreeNode child : node.children) {
+            methods.addAll(findAllMethods(child));
+        }
+
+        return methods;
+    }
+
     private static List<Match> collectAllMethodMatches(TreeNode a, TreeNode b) {
         List<Match> methodMatches = new ArrayList<>();
         List<TreeNode> methodsA = findAllMethods(a);
@@ -562,20 +577,6 @@ public final class TreeMatcher {
         }
 
         return methodMatches;
-    }
-
-    private static List<TreeNode> findAllMethods(TreeNode node) {
-        List<TreeNode> methods = new ArrayList<>();
-
-        if ("MethodDeclaration".equals(node.label)) {
-            methods.add(node);
-        }
-
-        for (TreeNode child : node.children) {
-            methods.addAll(findAllMethods(child));
-        }
-
-        return methods;
     }
 
     // 반복문 매칭
@@ -692,6 +693,16 @@ public final class TreeMatcher {
                         additionalMatch.a.minLine, additionalMatch.a.maxLine,
                         additionalMatch.b.minLine, additionalMatch.b.maxLine);
             }
+        }
+
+        return result;
+    }
+
+    private static List<Match> mergeAllMatches(List<Match>... matchLists) {
+        List<Match> result = new ArrayList<>();
+
+        for (List<Match> matches : matchLists) {
+            result = mergeMatches(result, matches);
         }
 
         return result;
