@@ -64,10 +64,6 @@ public final class TreeMatcher {
         List<Match> variableMatches = collectAllVariableMatches(A, B);
 
         // 6. 합치기 (중복 제거)
-        /*List<Match> result = mergeMatches(optimalMatches, methodMatches);
-        result = mergeMatches(result, loopMatches);
-        result = mergeMatches(result, conditionMatches);
-        return mergeMatches(result, variableMatches);*/
         return mergeAllMatches(optimalMatches, methodMatches, loopMatches, conditionMatches, variableMatches);
     }
 
