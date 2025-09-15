@@ -57,9 +57,13 @@ public final class TreeMatcher {
         // 3. Loop 모든 매칭 추가 수집
         List<Match> loopMatches = collectAllLoopMatches(A, B);
 
-        // 4. 합치기 (중복 제거)
+        // 4. Condition 모든 매칭 추가 수집
+        List<Match> conditionMatches = collectAllConditionMatches(A, B);
+
+        // 5. 합치기 (중복 제거)
         List<Match> result = mergeMatches(optimalMatches, methodMatches);
-        return mergeMatches(result, loopMatches);
+        result = mergeMatches(result, loopMatches);
+        return mergeMatches(result, conditionMatches);
         // return mergeMatches(optimalMatches, methodMatches);
     }
 
@@ -604,6 +608,37 @@ public final class TreeMatcher {
         return loopMatches;
     }
 
+    private static List<TreeNode> findAllConditions(TreeNode node) {
+        List<TreeNode> conditions = new ArrayList<>();
+
+        if ("IfStmt".equals(node.label)) {
+            conditions.add(node);
+        }
+
+        for (TreeNode child : node.children) {
+            conditions.addAll(findAllConditions(child));
+        }
+
+        return conditions;
+    }
+
+    private static List<Match> collectAllConditionMatches(TreeNode a, TreeNode b) {
+        List<Match> conditionMatches = new ArrayList<>();
+        List<TreeNode> conditionsA = findAllConditions(a);
+        List<TreeNode> conditionsB = findAllConditions(b);
+
+        for (TreeNode conditionA : conditionsA) {
+            for (TreeNode conditionB : conditionsB) {
+                if (shouldMatchNodes(conditionA, conditionB, calculateStructuralCost(conditionA, conditionB), 0)) {
+                    conditionMatches.add(new Match(conditionA, conditionB));
+                    log.warn("*** COLLECTED CONDITION MATCH: [{}-{}] <-> [{}-{}] ***",
+                            conditionA.minLine, conditionA.maxLine, conditionB.minLine, conditionB.maxLine);
+                }
+            }
+        }
+
+        return conditionMatches;
+    }
 
     private static List<Match> mergeMatches(List<Match> optimal, List<Match> additional) {
         List<Match> result = new ArrayList<>(optimal);
