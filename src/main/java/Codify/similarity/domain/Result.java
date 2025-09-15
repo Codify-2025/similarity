@@ -1,13 +1,20 @@
 package Codify.similarity.domain;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 @Entity
 @Getter
-@Setter
-@Table(name = "Result")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@Builder
+@Table(
+        name = "Result",
+        uniqueConstraints = @UniqueConstraint(
+        name = "uk_result_assignment_from_to",
+        columnNames = {"assignmentId", "submission_from_id", "submission_to_id"}
+    )
+)
 public class Result {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -20,9 +27,15 @@ public class Result {
     @Column(name = "submission_to_id")
     private Long submissionToId;
 
-    @Column(name = "submissionId")
-    private Long submissionId;
+    @Column(name = "student_from_id")
+    private Long studentFromId;
+
+    @Column(name = "student_to_id")
+    private Long studentToId;
 
     @Column(name = "accumulateResult")
     private double accumulateResult;
+
+    @Column(name = "assignmentId")
+    private Long assignmentId;
 }

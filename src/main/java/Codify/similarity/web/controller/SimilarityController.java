@@ -1,64 +1,45 @@
 package Codify.similarity.web.controller;
 
-import Codify.similarity.service.dto.AnalysisResult;
-import Codify.similarity.service.SimilarityService;
+import Codify.similarity.service.SimilarityBatchService;
+import Codify.similarity.web.dto.SimilarityStartResponseDto;
+import Codify.similarity.web.dto.SimilarityStatusResponseDto;
+import Codify.similarity.web.dto.SubmissionIdsRequestDto;
+import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/similarity")
+@RequestMapping("/api/similarity/assignments/{assignmentId}/submissions")
 public class SimilarityController {
 
-    private final SimilarityService similarityService;
+    private final SimilarityBatchService batchService;
 
-    @PostMapping
-    public ResponseEntity<Map<String, Object>> run(
-            @RequestParam Long fromStudentId,
-            @RequestParam Long toStudentId
+    @PostMapping("/batch")
+    public ResponseEntity<SimilarityStartResponseDto> run(
+            @PathVariable final Integer assignmentId,
+            @RequestBody @Valid final SubmissionIdsRequestDto submissionIdsRequestDto
     ) {
-        AnalysisResult ar = similarityService.analyzeAndSaveByStudent(fromStudentId, toStudentId);
-
-        String status = switch (ar.getStatus()) {
-            case READY -> "READY";
-            case DONE -> "DONE";
-            case ERROR -> "ERROR";
-        };
-
-        // 요구 포맷: 항상 200, message.status만 다르게
-        return ResponseEntity.ok(
-                Map.of(
-                        "status", 200,
-                        "success", true,
-                        "message", Map.of("status", status)
-                )
+        return ResponseEntity.accepted().body(
+                batchService.start(assignmentId, submissionIdsRequestDto.submissionIds())
         );
     }
 
-    /*@PostMapping
-    public ResponseEntity<SimilarityResponseDto> calculate(
-            @RequestParam Long fromId,
-            @RequestParam Long toId,
-            @Valid @RequestBody CompareRequest request
-    ) throws Exception {
-
-        // JSON(AST) + submissionId로 분석 및 저장
-        Result result = similarityService.analyzeAndSave(
-                request.getJson1(), request.getJson2(), fromId, toId
-        );
-
-         double cosine = result.getAccumulateResult();
-         return ResponseEntity.ok(new SimilarityResponseDto(cosine, null, null));
+    @Operation(
+            operationId = "getSimilarityStatusFromOne",
+            summary = "상태 조회, ids 없이 사용",
+            description = """
+            제출물 번호 하나만 입력하면 됩니다. 
+            - 프론트가 ids를 구성하지 않아도 되는 간단 폴링용 엔드포인트입니다.
+            """
+    )
+    @GetMapping("/{submissionFromId}/analyze")
+    public ResponseEntity<SimilarityStatusResponseDto> statusFromOne(
+            @PathVariable final Integer assignmentId,
+            @PathVariable final Integer submissionFromId
+    ) {
+        return ResponseEntity.ok(batchService.status(assignmentId, java.util.List.of(submissionFromId)));
     }
-
-    @Getter
-    @Setter
-    @NoArgsConstructor
-    public static class CompareRequest {
-        private JsonNode json1;
-        private JsonNode json2;
-    }*/
 }

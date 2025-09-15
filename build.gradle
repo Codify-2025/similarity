@@ -45,6 +45,10 @@ dependencies {
 	// mongo db
 	implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
 
+	// AWS SDK
+	implementation platform('software.amazon.awssdk:bom:2.20.162')
+	implementation 'software.amazon.awssdk:s3'
+
 
 }
 
