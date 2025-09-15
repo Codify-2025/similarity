@@ -54,8 +54,13 @@ public final class TreeMatcher {
         // 2. MethodDeclaration 모든 매칭 추가 수집
         List<Match> methodMatches = collectAllMethodMatches(A, B);
 
-        // 3. 합치기 (중복 제거)
-        return mergeMatches(optimalMatches, methodMatches);
+        // 3. Loop 모든 매칭 추가 수집
+        List<Match> loopMatches = collectAllLoopMatches(A, B);
+
+        // 4. 합치기 (중복 제거)
+        List<Match> result = mergeMatches(optimalMatches, methodMatches);
+        return mergeMatches(result, loopMatches);
+        // return mergeMatches(optimalMatches, methodMatches);
     }
 
     private static List<Match> matchNode(TreeNode a, TreeNode b, int depth) {
@@ -565,6 +570,41 @@ public final class TreeMatcher {
 
         return methods;
     }
+
+    // 반복문 매칭
+    private static List<TreeNode> findAllLoops(TreeNode node) {
+        List<TreeNode> loops = new ArrayList<>();
+
+        if ("ForStmt".equals(node.label) || "WhileStmt".equals(node.label)) {
+            loops.add(node);
+        }
+
+        for (TreeNode child : node.children) {
+            loops.addAll(findAllLoops(child));
+        }
+
+        return loops;
+    }
+
+    private static List<Match> collectAllLoopMatches(TreeNode a, TreeNode b) {
+        List<Match> loopMatches = new ArrayList<>();
+        List<TreeNode> loopsA = findAllLoops(a);
+        List<TreeNode> loopsB = findAllLoops(b);
+
+        for (TreeNode loopA : loopsA) {
+            for (TreeNode loopB : loopsB) {
+                if (shouldMatchNodes(loopA, loopB, calculateStructuralCost(loopA, loopB), 0)) {
+                    loopMatches.add(new Match(loopA, loopB));
+                    log.warn("*** COLLECTED LOOP MATCH: [{}-{}] <-> [{}-{}] ***",
+                            loopA.minLine, loopA.maxLine, loopB.minLine, loopB.maxLine);
+                }
+            }
+        }
+
+        return loopMatches;
+    }
+
+
     private static List<Match> mergeMatches(List<Match> optimal, List<Match> additional) {
         List<Match> result = new ArrayList<>(optimal);
 
@@ -586,4 +626,5 @@ public final class TreeMatcher {
 
         return result;
     }
+
 }
