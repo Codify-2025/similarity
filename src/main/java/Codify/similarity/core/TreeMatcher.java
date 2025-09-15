@@ -60,11 +60,14 @@ public final class TreeMatcher {
         // 4. Condition 모든 매칭 추가 수집
         List<Match> conditionMatches = collectAllConditionMatches(A, B);
 
-        // 5. 합치기 (중복 제거)
+        // 5. Variable 모든 매칭 추가 수집
+        List<Match> variableMatches = collectAllVariableMatches(A, B);
+
+        // 6. 합치기 (중복 제거)
         List<Match> result = mergeMatches(optimalMatches, methodMatches);
         result = mergeMatches(result, loopMatches);
-        return mergeMatches(result, conditionMatches);
-        // return mergeMatches(optimalMatches, methodMatches);
+        result = mergeMatches(result, conditionMatches);
+        return mergeMatches(result, variableMatches);
     }
 
     private static List<Match> matchNode(TreeNode a, TreeNode b, int depth) {
@@ -638,6 +641,38 @@ public final class TreeMatcher {
         }
 
         return conditionMatches;
+    }
+
+    private static List<TreeNode> findAllVariableDeclarations(TreeNode node) {
+        List<TreeNode> variables = new ArrayList<>();
+
+        if ("VariableDeclaration".equals(node.label)) {
+            variables.add(node);
+        }
+
+        for (TreeNode child : node.children) {
+            variables.addAll(findAllVariableDeclarations(child));
+        }
+
+        return variables;
+    }
+
+    private static List<Match> collectAllVariableMatches(TreeNode a, TreeNode b) {
+        List<Match> variableMatches = new ArrayList<>();
+        List<TreeNode> variablesA = findAllVariableDeclarations(a);
+        List<TreeNode> variablesB = findAllVariableDeclarations(b);
+
+        for (TreeNode variableA : variablesA) {
+            for (TreeNode variableB : variablesB) {
+                if (shouldMatchNodes(variableA, variableB, calculateStructuralCost(variableA, variableB), 0)) {
+                    variableMatches.add(new Match(variableA, variableB));
+                    log.warn("*** COLLECTED VARIABLE MATCH: [{}-{}] <-> [{}-{}] ***",
+                            variableA.minLine, variableA.maxLine, variableB.minLine, variableB.maxLine);
+                }
+            }
+        }
+
+        return variableMatches;
     }
 
     private static List<Match> mergeMatches(List<Match> optimal, List<Match> additional) {
