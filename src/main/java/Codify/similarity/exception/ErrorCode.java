@@ -15,6 +15,8 @@ public enum ErrorCode {
     SAME_SUBMISSION_COMPARISON(HttpStatus.BAD_REQUEST, "S3", "동일한 제출물끼리는 비교할 수 없습니다."),
     SAME_STUDENT_COMPARISON(HttpStatus.BAD_REQUEST,"S4", "동일한 학생 간에는 비교할 수 없습니다."),
 
+    ASSIGNMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "A2", "존재하지 않는 과제입니다."),
+
     ARTICLE_NOT_FOUND(HttpStatus.NOT_FOUND, "A1", "존재하지 않는 아티클입니다.");
 
     private final HttpStatus status; //http 상태 코드

@@ -1,6 +1,7 @@
 package Codify.similarity.service;
 
 import Codify.similarity.exception.ErrorCode;
+import Codify.similarity.exception.assignmentexception.AssignmentNotFoundException;
 import Codify.similarity.exception.baseException.BaseException;
 import Codify.similarity.exception.submissionexception.SubmissionNotFoundException;
 import Codify.similarity.mongo.ResultDoc;
@@ -60,6 +61,17 @@ public class SimilarityBatchService {
 
         final var ids = submissionIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
         if (ids.isEmpty()) throw new BaseException(ErrorCode.INVALID_INPUT_VALUE);
+
+        if (!resultDocRepository.existsByAssignmentId(assignmentId)) {
+            throw new AssignmentNotFoundException();
+        }
+
+        if (ids.size() == 1) {
+            var doc = resultDocRepository.findBySubmissionId(ids.get(0));
+            if (doc.isEmpty()) {
+                throw new SubmissionNotFoundException();
+            }
+        }
 
         final List<Integer> starts = determineStartSubmissions(assignmentId, ids);
 
