@@ -8,6 +8,8 @@ import java.util.Optional;
 public interface ResultDocRepository extends MongoRepository<ResultDoc, String> {
     Optional<ResultDoc> findBySubmissionId(Integer submissionId);
 
+    boolean existsByAssignmentId(Integer assignmentId);
+
     List<ResultDoc> findAllByAssignmentIdAndSubmissionIdGreaterThanAndAstIsNotNullOrderBySubmissionIdAsc(
             Integer assignmentId, Integer submissionId
     );
