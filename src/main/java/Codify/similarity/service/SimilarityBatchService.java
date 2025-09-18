@@ -25,6 +25,7 @@ public class SimilarityBatchService {
     private final ResultDocRepository resultDocRepository;
 
     // 중복되는 부분 공통 메서드로 추출
+    //분석을 시작할 submission목록 지정
     private List<Integer> determineStartSubmissions(final Integer assignmentId, final List<Integer> ids) {
         if (ids.size() == 1) {
             Integer from = ids.get(0);
@@ -38,6 +39,7 @@ public class SimilarityBatchService {
     }
 
     // 비동기 실행
+    //
     @Transactional
     public SimilarityStartResponseDto start(final Integer assignmentId, final List<Integer> submissionIds) {
         if (submissionIds == null || submissionIds.isEmpty())
@@ -54,6 +56,7 @@ public class SimilarityBatchService {
     }
 
     // status 집계
+    //유사도 분석 진행 상태 조회
     @Transactional(readOnly = true)
     public SimilarityStatusResponseDto status(final Integer assignmentId, final List<Integer> submissionIds) {
         if (submissionIds == null || submissionIds.isEmpty())
@@ -100,4 +103,5 @@ public class SimilarityBatchService {
 
         return new SimilarityStatusResponseDto(overall.name(), total, done, skipped, per);
     }
+
 }
