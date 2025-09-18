@@ -26,4 +26,9 @@ public interface ResultDocRepository extends MongoRepository<ResultDoc, String> 
             Integer assignmentId, Integer submissionId
     );
 
+    List<ResultDoc> findAllByAssignmentIdAndSubmissionIdInAndAstIsNotNull(
+            Long assignmentId,
+            List<Integer> submissionIds
+    );
+
 }
