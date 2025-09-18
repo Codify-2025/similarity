@@ -1,0 +1,121 @@
+# 워크플로우 이름
+name: CI/CD for similarity in k8s
+
+# 1. 실행 조건: deploy-k8s 브랜치에 push가 발생했을 때만 실행
+on:
+  push:
+    branches: [ "deploy-k8s" ]
+
+# 워크플로우 전체에서 사용할 환경 변수
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.docker_build.outputs.image_tag }}
+    env:
+      TAG: ${{ github.run_id }} 
+    permissions:
+      contents: read
+      packages: write # Docker 이미지 푸시를 위해 필요
+
+    steps:
+      - name: 1. 소스 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 2. JDK 17 설치
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: 3. Gradle 실행 권한 부여 및 빌드
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build -x test
+      - name: 4. Docker Hub 로그인
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DEPLOY_USERNAME }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+
+      - name: 5. 도커 이미지 빌드 및 푸시
+        id: docker_build
+        run: |
+          IMAGE_TAG=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "Building and pushing image: ${{ env.IMAGE_NAME }}:$IMAGE_TAG"
+          docker build -t ${{ secrets.DEPLOY_USERNAME }}/codify-similarity:${{ env.TAG }} .
+          docker push ${{ secrets.DEPLOY_USERNAME }}/codify-similarity:${{ env.TAG }}
+          echo "image_tag=${{ env.TAG }}" >> $GITHUB_OUTPUT
+  # ============================================
+  # CD 트리거 Job (매니페스트 업데이트)
+  # ============================================
+  
+  deploy:
+    # 'build-and-push' job이 성공해야만 실행됨
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 매니페스트 리포지토리 체크아웃
+        uses: actions/checkout@v4
+        with:
+          repository: Codify-2025/k8s-manifests
+          token: ${{ secrets.DEPLOY_PAT_TOKEN }}
+
+      - name: 2. Deployment.yaml 파일의 이미지 태그 업데이트
+        working-directory: ./deploy/similarity
+        run: |
+          sed -i "s|image: ${{ secrets.DEPLOY_USERNAME }}/codify-similarity:.*|image: ${{ secrets.DEPLOY_USERNAME }}/codify-similarity:${{ needs.build-and-push.outputs.image_tag }}|" deployment.yaml
+      - name: 3. 변경된 매니페스트 커밋 및 푸시
+        id: commit_step
+        run: |
+          git config --global user.name 'dylee00'
+          git config --global user.email 'dylee6820@gmail.com'
+          git add .
+          if git diff-index --quiet HEAD; then
+            echo "No changes to commit."
+            echo "deployed=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "Deploy: Update similarity image to ${{ needs.build-and-push.outputs.image_tag }}"
+            git push
+            echo "deployed=true" >> $GITHUB_OUTPUT
+          fi
+      - name: 4. Discord Notification
+        if: steps.commit_step.outputs.deployed == 'true'
+        uses: Ilshidur/action-discord@0.3.2
+        env: 
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_USERNAME: DEPLOY_BOT
+          DISCORD_AVATAR: https://github.com/pknu-wap/WAPP/blob/main/image/icon.png?raw=true
+          DISCORD_EMBEDS: |  
+            [
+                  { 
+                    "title": "🚀 배포 완료!",
+                    "color": 65280,
+                    "description": "${{ github.event.repository.name }} 서비스가 성공적으로 배포되었습니다.",
+                    "fields": [
+                      {
+                        "name": "Repository",
+                        "value": "${{ github.event.repository.name }}",
+                        "inline": true
+                      },
+                      {
+                        "name": "Image Tag",
+                        "value": "${{ needs.build-and-push.outputs.image_tag }}",
+                        "inline": true
+                      },
+                      {
+                        "name": "Actor",
+                        "value": "${{ github.actor }}",
+                        "inline": true
+                      },
+                      {
+                        "name": "Commit",
+                        "value": "[${{ github.sha }}](${{ github.event.repository.html_url }}/commit/${{ github.sha }})",
+                        "inline": false
+                      }
+                    ],
+                    "timestamp": "${{ github.event.head_commit.timestamp }}"
+                  }
+                ]
