@@ -16,7 +16,7 @@ spring:
 
   spring:
     rabbitmq:
-      host: rabbitmq
+      host: rabbitmq.codify.svc.cluster.local
       port: 5672
       username: admin
       password: codify2025
