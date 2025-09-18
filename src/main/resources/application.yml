@@ -16,10 +16,10 @@ spring:
 
   spring:
     rabbitmq:
-      host: ${RABBITMQ_HOST}
-      port: ${RABBITMQ_PORT}
-      username: ${RABBITMQ_USERNAME}
-      password: ${RABBITMQ_PASSWORD}
+      host: rabbitmq
+      port: 5672
+      username: admin
+      password: codify2025
       virtual-host: /
 
   jpa:
