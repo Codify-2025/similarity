@@ -214,6 +214,13 @@ public class SimilarityService {
     @Transactional
     public void analyzeAndSaveRefactor(MessageDto message) {
         Long assignmentId = message.getAssignmentId();
+        log.info("similarity queue에서 메시지 pull");
+        log.info("submissionIds: {}", message.getSubmissionIds());
+        log.info("assignmentId: {}", message.getAssignmentId());
+        log.info("push groupId: {}", message.getGroupId());
+        log.info("push messageType: {}", message.getMessageType());
+        log.info("totalFiles: {}", message.getTotalFiles());
+
         List<Integer> submissionIds =
                 message.getSubmissionIds().stream()
                         .map(Math::toIntExact)
@@ -289,6 +296,11 @@ public class SimilarityService {
         log.info("Sending similarity complete message to RabbitMQ: {}", completedMessage);
         rabbitTemplate.convertAndSend("codifyExchange", "similarity.complete", completedMessage);
         log.info("Message sent successfully");
+        log.info("submissionIds: {}", completedMessage.getSubmissionIds());
+        log.info("assignmentId: {}", completedMessage.getAssignmentId());
+        log.info("push groupId: {}", completedMessage.getGroupId());
+        log.info("push messageType: {}", completedMessage.getMessageType());
+        log.info("totalFiles: {}", completedMessage.getTotalFiles());
 
     }
 

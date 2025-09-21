@@ -20,11 +20,11 @@ public class SimilarityMessageListener {
     @RabbitListener(queues = "similarity.queue", containerFactory =
             "rabbitListenerContainerFactory")
     public void handleParsingComplete(MessageDto message) {
-        log.info("Received similarity message: {}", message.getGroupId());
+        log.info("Received similarity message from similarity.queue: {}", message.getGroupId());
         try {
             similarityService.analyzeAndSaveRefactor(message);
         } catch (Exception e) {
-            log.error("Failed to process similarity message", e);
+            log.error("Failed to process similarity message from similarity.queue", e);
             throw new AmqpRejectAndDontRequeueException("similarity failed", e);
         }
     }

@@ -16,12 +16,12 @@ public class ClientMessageListener {
 
     @RabbitListener(queues = "client.queue", containerFactory = "rabbitListenerContainerFactory")
     public void handleSimilarityComplete(MessageDto message) {
-        log.info("Received similarity complete message: {}", message);
+        log.info("Received similarity complete message from client.queue: {}", message.getGroupId());
         try {
             queue.offer(message);
             log.info("Message added to queue. Queue size: {}", queue.size());
         } catch (Exception e) {
-            log.error("Failed to process similarity complete message", e);
+            log.error("Failed to process similarity complete message from client.queue", e);
             throw new AmqpRejectAndDontRequeueException("similarity failed", e);
         }
     }
