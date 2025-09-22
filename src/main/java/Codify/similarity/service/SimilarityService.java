@@ -46,6 +46,7 @@ public class SimilarityService {
     private final AnalysisRuntimeRegistry runtime;
     private final CodelineRepository codelineRepository;
     private final RabbitTemplate rabbitTemplate;
+    private final SseEventPublisher sseEventPublisher;
 
 
     private static final double COSINE_THRESHOLD = 0.8;
@@ -282,6 +283,14 @@ public class SimilarityService {
             log.info("codeline 저장 시작");
             saveCodelinesBatch(allCodelines, allResults);
             log.info("codeline 저장 완료");
+        }
+
+        // SSE 완료 이벤트 발행
+        try {
+            sseEventPublisher.publishCompleted(message.getGroupId());
+            log.info("SSE 완료 이벤트 발행 성공: groupId={}", message.getGroupId());
+        } catch (Exception e) {
+            log.error("SSE 완료 이벤트 발행 실패: groupId={}", message.getGroupId(), e);
         }
 
         //유사도 완료 후 message를 RabbitMQ에 push
