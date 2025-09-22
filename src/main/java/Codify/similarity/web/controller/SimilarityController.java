@@ -2,6 +2,7 @@ package Codify.similarity.web.controller;
 
 import Codify.similarity.service.SimilarityBatchService;
 import Codify.similarity.service.SimilarityService;
+import Codify.similarity.service.SseEventPublisher;
 import Codify.similarity.service.listener.ClientMessageListener;
 import Codify.similarity.web.dto.MessageDto;
 import Codify.similarity.web.dto.SimilarityStartResponseDto;
@@ -10,8 +11,10 @@ import Codify.similarity.web.dto.SubmissionIdsRequestDto;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -24,6 +27,7 @@ public class SimilarityController {
     private final SimilarityBatchService batchService;
     private final SimilarityService similarityService;
     private final ClientMessageListener messageListener;
+    private final SseEventPublisher sseEventPublisher;
 
     @PostMapping("/assignments/{assignmentId}/submissions/batch")
     public ResponseEntity<SimilarityStartResponseDto> run(
@@ -53,7 +57,13 @@ public class SimilarityController {
 
     //리팩토링 로직
 
-    //프론트 폴링용 -> 추후에 sse로 변경하기
+    // SSE 연결 엔드포인트
+    @GetMapping(value = "/analyze/sse/{groupId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribeToEvents(@PathVariable String groupId) {
+        return sseEventPublisher.createConnection(groupId);
+    }
+
+    //프론트 폴링용 -> 추후에 sse로 변경
     @GetMapping("/analyze")
     public ResponseEntity<?> analyze() {
         try {
