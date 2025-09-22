@@ -22,9 +22,13 @@ public class SimilarityMessageListener {
     public void handleParsingComplete(MessageDto message) {
         log.info("Received similarity message: {}", message.getGroupId());
         try {
+            log.info("Starting similarity analysis for groupId: {}", message.getGroupId());
             similarityService.analyzeAndSaveRefactor(message);
+            log.info("Similarity analysis started successfully for groupId: {}", message.getGroupId());
         } catch (Exception e) {
-            log.error("Failed to process similarity message", e);
+            log.error("Failed to process similarity message for groupId: {}", message.getGroupId(), e);
+            log.error("Error details: {}", e.getMessage());
+            e.printStackTrace();
             throw new AmqpRejectAndDontRequeueException("similarity failed", e);
         }
     }
